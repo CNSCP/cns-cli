@@ -1,0 +1,5 @@
+#!/usr/bin/env node cns
+
+// Output stats
+echo Started on $started
+echo Current status is $status
