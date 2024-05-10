@@ -17,8 +17,6 @@ The CLI includes various commands that map to the services provided by CNS Dapr.
 
 ## Installing
 
-npm i -g cns-cli
-
 To **install** or **update** the application, you should fetch the latest version from this Git repository. To do that, you may either download and unpack the repo zip file, or clone the repo using:
 
 ```sh
@@ -31,6 +29,12 @@ Either method should get you a copy of the latest version. It is recommended (bu
 npm install
 ```
 
+Install as a global command with:
+
+```sh
+npm install -g .
+```
+
 Your application should now be ready to rock.
 
 ## Usage
@@ -38,48 +42,38 @@ Your application should now be ready to rock.
 Once installed, run the application with:
 
 ```sh
-npm run start
+cns
 ```
 
-To shut down the application, hit `ctrl-c`.
+To shut down the application, hit `ctrl-c` twice or enter `quit`.
 
 ### Environment Variables
 
-The example uses the following environment variables to configure itself:
+The application uses the following environment variables to configure itself:
 
 | Variable         | Description                      | Default                |
 |------------------|----------------------------------|------------------------|
+| CNS_CONTEXT      | CNS Dapr context                 | Must be set            |
+| CNS_DAPR         | CNS Dapr application ID          | 'cns-dapr'             |
+| CNS_DAPR_HOST    | CNS Dapr host                    | 'localhost'            |
+| CNS_DAPR_PORT    | CNS Dapr port                    | '3500'                 |
+| CNS_PUBSUB       | CNS Dapr PUBSUB component ID     | 'cns-pubsub'           |
 | CNS_SERVER_HOST  | CNS Example server host          | 'localhost'            |
 | CNS_SERVER_PORT  | CNS Example server port          | '3100'                 |
-| CNS_DAPR_HOST    | Dapr host                        | 'localhost'            |
-| CNS_DAPR_PORT    | Dapr port                        | '3500'                 |
-| CNS_DAPR         | CNS Dapr application ID          | 'cns-dapr'             |
-| CNS_PUBSUB       | CNS Dapr PUBSUB component ID     | 'cns-pubsub'           |
-| CNS_CONTEXT      | CNS Dapr context                 | Must be set            |
 
-#### Linux
-
-| Command                              | Description                           |
-|--------------------------------------|---------------------------------------|
-| env                                  | List all variables                    |
-| export [name]=[value]                | Set variable                          |
-| unset [name]                         | Remove variable                       |
-
-#### Windows
-
-| Command                              | Description                           |
-|--------------------------------------|---------------------------------------|
-| set                                  | List all variables                    |
-| set [name]=[value]                   | Set variable                          |
-| set [name]=                          | Remove variable                       |
+Variables may also be read from a `.env` file, overriding those set by the os.
 
 ### Commands
 
 | Command                        | Description                                 |
 |--------------------------------|---------------------------------------------|
-| cns list                       |                                             |
+| help                           | Show help information                       |
+| config                         | Show the current config properties          |
+| config CNS_CONTEXT <id>        | Set the CNS Dapr context id                 |
+| init                           | Write the current config to the .env file   |
+| list                           | Show information about the CNS node         |
 
-// sudo chmod +x filename
+See the `help` command for further information.
 
 ## Maintainers
 

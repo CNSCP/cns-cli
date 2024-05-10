@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 // cns.js - CNS Command line
 // Copyright 2024 Padi, Inc. All Rights Reserved.
 
@@ -865,7 +867,7 @@ async function save(arg1) {
   const file = argument(arg1);
 
   // Write file
-  const data = '#!/usr/bin/env node cns\n' +
+  const data = '#!/usr/bin/env cns\n' +
     generated() +
     reverse(terminal.history).join('\n') + '\n';
 

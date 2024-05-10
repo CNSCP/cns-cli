@@ -5,6 +5,9 @@
   "author": "Padi, Inc",
   "license": "ISC",
   "main": "cns.js",
+  "bin": {
+    "cns": "cns.js"
+  },
   "scripts": {
     "start": "node cns",
     "stop": "killall node"

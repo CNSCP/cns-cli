@@ -1,4 +1,4 @@
-#!/usr/bin/env node cns
+#!/usr/bin/env cns
 
 // Output stats
 echo Started on $started
