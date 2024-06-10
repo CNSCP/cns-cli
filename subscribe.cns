@@ -1,0 +1,6 @@
+#!/usr/bin/env cns
+
+// Monitor context title
+output format text
+echo -n "title is currently "; get title
+on title echo title changed to $data

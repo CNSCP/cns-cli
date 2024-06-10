@@ -1,5 +1,16 @@
 #!/usr/bin/env cns
 
 // Output stats
-echo Started on $started
-echo Current status is $status
+connect
+echo "╔════════════╤══════════════════════════╗"
+echo "║ Started    │ $started                 ║"
+echo "╟────────────┼──────────────────────────╢"
+echo "║ Context    │ $CNS_CONTEXT             ║"
+echo "╟────────────┼──────────────────────────╢"
+echo "║ Connection │ $connection              ║"
+echo "╚════════════╧══════════════════════════╝"
+//print
+echo
+echo "Started    :" $started
+echo "Context    :" $CNS_CONTEXT
+echo "Connection :" $connection

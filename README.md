@@ -45,7 +45,7 @@ Once installed, run the application with:
 cns
 ```
 
-To shut down the application, hit `ctrl-c` twice or enter `quit`.
+To shut down the application, hit `ctrl-c` twice or enter `exit`.
 
 ### Environment Variables
 
@@ -53,25 +53,26 @@ The application uses the following environment variables to configure itself:
 
 | Variable         | Description                      | Default                |
 |------------------|----------------------------------|------------------------|
-| CNS_CONTEXT      | CNS Dapr context                 | Must be set            |
-| CNS_DAPR         | CNS Dapr application ID          | 'cns-dapr'             |
+| CNS_BROKER       | CNS Broker service               | 'padi'                 |
+| CNS_CONTEXT      | CNS Broker context               | Must be set            |
+| CNS_TOKEN        | CNS Broker token                 | Must be set            |
+| CNS_DAPR         | CNS Dapr application             | 'cns-dapr'             |
 | CNS_DAPR_HOST    | CNS Dapr host                    | 'localhost'            |
 | CNS_DAPR_PORT    | CNS Dapr port                    | '3500'                 |
-| CNS_PUBSUB       | CNS Dapr PUBSUB component ID     | 'cns-pubsub'           |
-| CNS_SERVER_HOST  | CNS Example server host          | 'localhost'            |
-| CNS_SERVER_PORT  | CNS Example server port          | '3100'                 |
+| CNS_PUBSUB       | CNS Dapr PUBSUB component        | 'cns-pubsub'           |
+| CNS_SERVER_HOST  | Dapr server host                 | 'localhost'            |
+| CNS_SERVER_PORT  | Dapr server port                 | '3100'                 |
 
-Variables may also be read from a `.env` file, overriding those set by the os.
+Alternatively, variables can be stored in a `.env` file in the project directory.
 
 ### Commands
 
 | Command                        | Description                                 |
 |--------------------------------|---------------------------------------------|
-| help                           | Show help information                       |
+| init                           | Write .env config file in current directory |
 | config                         | Show the current config properties          |
-| config CNS_CONTEXT <id>        | Set the CNS Dapr context id                 |
-| init                           | Write the current config to the .env file   |
-| list                           | Show information about the CNS node         |
+| config CNS_CONTEXT id          | Set the current CNS context id              |
+| map                            | Show information about the CNS context      |
 
 See the `help` command for further information.
 

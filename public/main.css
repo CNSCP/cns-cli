@@ -1,0 +1,295 @@
+/* main.css - CNS Dashboard */
+/* Copyright 2024 Padi, Inc. All Rights Reserved. */
+
+@charset "utf-8";
+
+@font-face {
+  font-family: 'font';
+  font-display: block;
+  src: url('font.ttf');
+}
+
+@font-face {
+  font-family: 'icons';
+  font-display: block;
+  src: url('icons.ttf');
+}
+
+:root {
+  --font: 'font', sans-serif;
+  --icons: 'icons', sans-serif;
+  --title: #f5f5f5;
+  --icon: #0d2192;
+  --button: #888888;
+  --hover: #f0f0f0;
+  --anchor: #0d2192;
+  --table: #ffffff;
+  --header: #888888;
+  --border: #e0e0e0;
+  --back: #fafafa;
+  --fore: #202020;
+}
+
+body[scheme="dark"] {
+  --title: #212121;
+  --icon: #ffffff;
+  --button: #888888;
+  --hover: #505050;
+  --anchor: #7887d9;
+  --table: #424242;
+  --header: #c0c0c0;
+  --border: #595959;
+  --back: #303030;
+  --fore: #ffffff;
+}
+
+html {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font);
+  font-weight: 400;
+  overscroll-behavior: none;
+  background-color: var(--back);
+  color: var(--fore);
+  margin: 0;
+  height: 100%
+}
+
+h1 {
+  font-size: 24px;
+  font-weight: 400;
+  margin: 0 0 32px 0;
+}
+
+h2 {
+  font-size: 20px;
+  font-weight: 400;
+  margin: 32px 0 16px 0;
+}
+
+i {
+  font-family: var(--icons);
+  font-style: normal;
+}
+
+a {
+  text-decoration: none;
+  color: var(--anchor);
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+main {
+  height: 100%;
+}
+
+header {
+  font-size: 28px;
+  display: flex;
+  position: relative;
+  box-sizing: border-box;
+  box-shadow: 0 3px 5px -1px rgba(0, 0, 0, 0.2), 0 5px 8px 0 rgba(0, 0, 0, 0.14), 0 1px 14px 0 rgba(0, 0, 0, 0.12);
+  background-color: var(--title);
+  padding: 0 16px;
+  line-height: 62px;
+  height: 64px;
+  user-select: none;
+}
+
+header > i {
+  font-size: 32px;
+  color: var(--icon);
+  margin-right: 16px;
+}
+
+header > span {
+  font-size: 16px;
+  text-align: right;
+  margin-left: 16px;
+  flex-grow: 1;
+}
+
+footer {
+  font-size: 14px;
+  display: flex;
+  position: relative;
+  box-sizing: border-box;
+  box-shadow: 0 3px 5px -1px rgba(0, 0, 0, 0.2), 0 5px 8px 0 rgba(0, 0, 0, 0.14), 0 1px 14px 0 rgba(0, 0, 0, 0.12);
+  background-color: var(--title);
+  padding: 0 16px;
+  line-height: 30px;
+  height: 32px;
+  user-select: none;
+}
+
+footer > span {
+  text-align: right;
+  margin-left: 16px;
+  flex-grow: 1;
+}
+
+article {
+  display: flex;
+  height: 100%;
+}
+
+main:has(header) article {
+  height: calc(100% - 64px);
+}
+
+main:has(footer) article {
+  height: calc(100% - 32px);
+}
+
+main:has(header):has(footer) article {
+  height: calc(100% - 96px);
+}
+
+nav {
+  display: flex;
+  flex-direction: column;
+  background-color: var(--table);
+  border-right: 1px solid var(--border);
+}
+
+nav > span {
+  flex-grow: 1;
+}
+
+nav button {
+  display: flex;
+  outline: none;
+  background-color: transparent;
+  color: var(--button);
+  border: none;
+  border-top: 1px solid var(--border);
+  padding: 0;
+  line-height: 55px;
+}
+
+nav button i {
+  font-size: 24px;
+  padding: 0 16px;
+  width: 32px;
+}
+
+nav button span {
+  font-size: 18px;
+  padding-right: 64px;
+}
+
+nav[state="collapse"] button span {
+  display: none;
+}
+
+nav button:first-child,
+nav span+button {
+  border-top: 1px solid transparent;
+}
+
+nav button:focus-visible,
+nav button:hover {
+  background-color: var(--hover);
+  cursor: pointer;
+}
+
+section {
+  display: none;
+  overflow: scroll;
+  outline: none;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 64px;
+}
+
+table {
+  background-color: var(--table);
+  box-shadow: 0 5px 5px -3px rgba(0, 0, 0, 0.2), 0 8px 10px 1px rgba(0, 0, 0, 0.14), 0 3px 14px 2px rgba(0, 0, 0, 0.12);
+  border-collapse: collapse;
+  width: 100%;
+}
+
+table tr {
+  height: 52px;
+}
+
+table th {
+  font-size: 12px;
+  font-weight: normal;
+  text-align: left;
+  color: var(--header);
+  padding: 4px 20px;
+}
+
+table td {
+  font-size: 14px;
+  padding: 4px 20px;
+}
+
+table tr:not(:last-child) th,
+table tr:not(:last-child) td {
+  border-bottom: 1px solid var(--border);
+}
+
+[hidden] {
+  display: none;
+}
+
+[selected] {
+  color: var(--icon);
+}
+
+[ripple] {
+  background-image: radial-gradient(circle, transparent 1%, var(--border) 1%);
+  background-size: 15000%;
+  background-position: center;
+  transition: opacity 0.2s ease, background-color 0.5s ease, background-size 0.5s ease;
+}
+
+[ripple]:active {
+  background-color: var(--border);
+  background-size: 50%;
+  transition: opacity 0.2s ease, background-color 0.15s ease, background-size 0.15s ease;
+}
+
+/* ----- */
+
+#collapse,
+#expand {
+  display: none;
+  border-top: 1px solid transparent;
+}
+
+#light,
+#dark {
+  display: none;
+}
+
+nav[state="collapse"] #collapse,
+nav[state="expand"] #expand {
+  display: flex;
+}
+
+body:not([scheme="dark"]) #light,
+body[scheme="dark"] #dark {
+  display: flex;
+}
+
+
+article[nav="home"] #home,
+article[nav="apps"] #apps,
+article[nav="config"] #config,
+article[nav="about"] #about {
+  color: var(--icon);
+}
+
+article[nav="home"] section[nav="home"],
+article[nav="apps"] section[nav="apps"],
+article[nav="config"] section[nav="config"],
+article[nav="about"] section[nav="about"] {
+  display: block;
+}

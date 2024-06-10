@@ -1,21 +1,26 @@
 {
   "name": "cns-cli",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "CNS CLI",
   "author": "Padi, Inc",
   "license": "ISC",
-  "main": "cns.js",
+  "main": "index.js",
   "bin": {
-    "cns": "cns.js"
+    "cns": "index.js"
   },
   "scripts": {
-    "start": "node cns",
-    "stop": "killall node"
+    "start": "node index",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
     "@dapr/dapr": "^3.1.2",
     "colors": "^1.4.0",
+    "compression": "^1.7.4",
     "dotenv": "^16.4.5",
+    "express": "^4.17.1",
+    "jsonwebtoken": "^8.5.1",
+    "jstoxml": "^5.0.1",
+    "object-merge": "^2.5.1",
     "table": "^6.8.1"
   }
 }
