@@ -11,6 +11,7 @@ const dapr = require('@dapr/dapr');
 
 const env = require('dotenv').config();
 const express = require('express');
+const expressws = require('express-ws');
 const compression = require('compression');
 const merge = require('object-merge');
 const colours = require('colors');
@@ -18,6 +19,7 @@ const readline = require('readline');
 const tables = require('table');
 const jstoxml = require('jstoxml');
 const jwt = require('jsonwebtoken');
+const http = require('http');
 const https = require('https');
 const path = require('path');
 const fs = require('fs');
@@ -93,7 +95,7 @@ const options = {
 };
 
 // Stats
-
+/*
 const stats = {
   started: new Date().toISOString(),
   reads: 0,
@@ -101,7 +103,7 @@ const stats = {
   updates: 0,
   errors: 0,
   connection: 'offline'
-};
+};*/
 
 // Commands
 
@@ -175,8 +177,11 @@ var completions;
 var again;
 var signal;
 
-var events = {};
 var change;
+var pipe;
+
+var sockets = [];
+var events = {};
 
 // Local functions
 
@@ -582,7 +587,7 @@ function variable(value) {
 
     if (data === undefined) data = system[name];
     if (data === undefined) data = options[name];
-    if (data === undefined) data = stats[name];
+//    if (data === undefined) data = stats[name];
     if (data === undefined) data = process.env[name];
 
     // Not found
@@ -599,7 +604,7 @@ function variable(value) {
 function property(path, obj, name, value) {
   // Output all properties?
   if (name === undefined)
-    display(path, obj);
+    display(path, 'data', obj);
   else {
     // Property must exist
     const current = obj[name];
@@ -609,7 +614,7 @@ function property(path, obj, name, value) {
 
     // Output or set property?
     if (value === undefined)
-      display(path + '/' + name, current);
+      display(path + '/' + name, 'data', current);
     else obj[name] = cast(current, value);
   }
 }
@@ -644,6 +649,7 @@ function help() {
   print('  whoami                        Display current context');
   print('  token [text]                  Display token properties');
   print('  dashboard [port]              Start dashboard server');
+  print('  serve [path] [port]           Start http server');
   print('  connect                       Connect to CNS Dapr');
   print('  disconnect                    Disconnect from CNS Dapr');
   print('  top                           Monitor node changes');
@@ -680,7 +686,7 @@ function help() {
 
 // Show version
 function version() {
-  print(pack.version);
+  display('version', 'data', pack.version);
 }
 
 // Init env
@@ -770,9 +776,15 @@ function output(arg1, arg2) {
 }
 
 // Display status
-function status(arg1) {
+async function status(arg1) {
   const name = argument(arg1);
-  property('status', stats, name);
+
+  // Get node
+  const res = await request(
+    dapr.HttpMethod.GET,
+    '/node/status');
+
+  property('status', res, name);
 }
 
 // Display memory
@@ -790,7 +802,7 @@ function network(arg1) {
 
   // Display all?
   if (name === '-l') {
-    display('network', nets);
+    display('network', 'network', nets);
     return;
   }
 
@@ -799,7 +811,7 @@ function network(arg1) {
     for (const net of nets[id]) {
       // Probably ip address
       if ((net.family === 'IPv4' || net.family === 4) && !net.internal)
-        property(id, net, name);
+        property('network', net, name);
     }
   }
 }
@@ -810,7 +822,7 @@ function whoami() {
   if (config.CNS_CONTEXT === '')
     throw new Error(E_CONTEXT);
 
-  display('context', config.CNS_CONTEXT);
+  display('context', 'context', config.CNS_CONTEXT);
 }
 
 //
@@ -825,7 +837,7 @@ function token(arg1) {
     const payload = JSON.parse(atob(parts[1]));
     const signature = parts[2];
 
-    display('token', {
+    display('token', 'token', {
       header: header,
       payload: payload,
       signature: signature
@@ -838,24 +850,65 @@ function token(arg1) {
 
 // Start dashboard
 function dashboard(arg1) {
+  const host = 'localhost';
+  const port = argument(arg1, '8080');
+
   // I promise to
   return new Promise((resolve, reject) => {
-    const host = 'localhost';
-    const port = argument(arg1, '8080');
-
     // Initialize express
-    const app = express();
+    const app = new express();
 
     app.use(compression());
-    app.use(express.static('./public'));
+    app.use(express.static(path.join(__dirname, '/public')));
 
-    // All other requests
-    app.use((req, res) => {
-      res.status(404).send('<h1>Page not found</h1>');
-    });
+    debug('create webserver');
 
-    // Start server
-    const server = app.listen(port, host, () => {
+    // Create server
+    const server = http.createServer(app)
+    // Started
+    .on('listening', () => {
+      // Create web socket
+      debug('create websocket');
+      sockets.push(expressws(app, server).getWss());
+
+      // Web socket request
+      app.ws('/', (ws, req) => {
+        // Receive
+        ws.on('message', async (packet) => {
+          // Pipe to socket
+          pipe = ws;
+
+          try {
+            debug('websocket message: ' + packet);
+
+            const data = JSON.parse(packet);
+            await command(data.command);
+          } catch(e) {
+            debug('websocket error: ' + e.message);
+
+            pipe.send(JSON.stringify({
+              error: e.message
+            }));
+          }
+          pipe = undefined;
+        })
+        // Closed
+        .on('close', () => {
+          debug('websocket disconnect');
+        })
+        // Failure
+        .on('error', (e) => {
+          debug('websocket error: ' + e.message);
+        });
+
+        debug('websocket connect');
+      });
+
+      // All other requests
+      app.use((req, res) => {
+        res.status(404).send('<h1>Page not found</h1>');
+      });
+
       print('CNS Dashboard running on http://' + host + ':' + port);
       if (terminal !== undefined) resolve();
     })
@@ -863,6 +916,9 @@ function dashboard(arg1) {
     .on('error', (e) => {
       reject(e);
     });
+
+    // Start listening
+    server.listen(port);
   });
 }
 
@@ -892,121 +948,150 @@ async function disconnect() {
 
 // Show top changes
 async function top() {
-  // I promise to
-//  return new Promise(async (resolve) => {
-    // Get node
-    const node = await request(
-      dapr.HttpMethod.GET,
-      '/node');
+  // Get node
+  const node = await request(
+    dapr.HttpMethod.GET,
+    '/node');
 
-    var status = node.status;
-    var changes = {};
+  var status = node.status;
+  var changes = {};
 
-    // Draw changes
-    change = async (data) => {
-      try {
-        // Get node status
-        status = await request(
-          dapr.HttpMethod.GET,
-          '/node/status');
-      } catch(e) {
-        // Failure
-        status.connection = 'offline';
-        changes = {};
+  // Draw changes
+  change = async (data) => {
+    try {
+      // Get node status
+      status = await request(
+        dapr.HttpMethod.GET,
+        '/node/status');
+    } catch(e) {
+      // Failure
+      status.connection = 'offline';
+      changes = {};
+    }
+
+    const cols = columns();
+    const lins = rows();
+
+    const lines = [];
+
+    lines.push('Node: ' + node.version + ', ' + node.broker + ' broker, connection ' + status.connection + '.');
+    lines.push('Status: ' + status.reads + ' reads, ' + status.writes + ' writes, ' + status.updates + ' updates, ' + status.errors + ' errors.');
+    lines.push('');
+
+    // Display changes
+    if (data !== undefined) {
+      // Merge changes
+      changes = merge(changes, data);
+
+      // Format result
+      const result = format('data', changes).split('\n');
+
+      for (const line of result) {
+        if (lines.length >= lins - 1) break;
+        lines.push(line);
       }
+    }
 
-      const cols = columns();
-      const lins = rows();
+    if (Object.keys(changes).length === 0) {
+      if (status.connection === 'offline')
+        lines.push('OFFLINE'.red);
+      else lines.push('NO CHANGE');
 
-      const lines = [];
-
-      lines.push('Node: ' + node.version + ', ' + node.broker + ' broker, connection ' + status.connection + '.');
-      lines.push('Status: ' + status.reads + ' reads, ' + status.writes + ' writes, ' + status.updates + ' updates, ' + status.errors + ' errors.');
-      lines.push('');
-
-      // Display changes
-      if (data !== undefined) {
-        // Merge changes
-        changes = merge(changes, data);
-
-        // Format result
-        const result = format('data', changes).split('\n');
-
-        for (const line of result) {
-          if (lines.length >= lins - 1) break;
-          lines.push(line);
-        }
-      }
-
-      if (Object.keys(changes).length === 0) {
-        if (status.connection === 'offline')
-          lines.push('OFFLINE'.red);
-        else lines.push('NO CHANGE');
-
-        cls();
-      }
-
-      process.stdout.write('\u001b[0;0H');
-
-      for (const line of lines) {
-        var l = line.substr(0, cols);
-        if (l.length < cols) l += '\u001b[K';
-
-        process.stdout.write(l + '\n');
-      }
-
-      // Output time
-      const time = new Date().toLocaleTimeString();
-      process.stdout.write('\u001b[0;' + (cols - 7) + 'H' + time + '\r');
-    };
-
-    // Initial display
-    change();
-
-    // Subscribe to context
-//    if (server === undefined)
-      await subscribe();
-
-    // Set draw timer
-    const timer = setInterval(change, 1000);
-
-    // Break signal handler
-    signal = () => {
-      change = undefined;
-
-      clearInterval(timer);
       cls();
+    }
 
-      prompt();
-//      resolve();
-    };
-//  });
+    process.stdout.write('\u001b[0;0H');
+
+    for (const line of lines) {
+      var l = line.substr(0, cols);
+      if (l.length < cols) l += '\u001b[K';
+
+      process.stdout.write(l + '\n');
+    }
+
+    // Output time
+    const time = new Date().toLocaleTimeString();
+    process.stdout.write('\u001b[0;' + (cols - 7) + 'H' + time + '\r');
+  };
+
+  // Initial display
+  change();
+
+  // Subscribe to context
+  await subscribe();
+
+  // Set draw timer
+  const timer = setInterval(change, 1000);
+
+  // Break signal handler
+  signal = () => {
+    change = undefined;
+
+    clearInterval(timer);
+    cls();
+
+    prompt();
+  };
 }
 
 // Show node map
-async function map(arg1, arg2) {
-  var name = argument(arg1);
-  var all = false;
-
-  // Display all?
-  if (name === '-l') {
-    all = true;
-    name = argument(arg2);
-  }
+async function map(arg1) {
+  var all = (argument(arg1) === '-l');
 
   // Get node
   const res = await request(
     dapr.HttpMethod.GET,
     '/node');
 
-    // Output result
-  const node = mapout(all, name, res, res);
-  display('node', node);
+  // Show contexts
+  const node = {};
+  const cons = res.contexts;
+
+  for (const id in cons) {
+    const con = cons[id];
+
+    const name = con.name + (all?(' (' + id + ')'):'');
+    const caps = cons[id].capabilities;
+
+    // Show capabilities
+    const context = {};
+
+    for (const profile in caps) {
+      const cap = con.capabilities[profile];
+
+      const role = profile.endsWith(':provider')?'consumer':'provider';
+      const conns = caps[profile].connections;
+
+      // Show connections
+      const capability = {};
+
+      for (const id in conns) {
+        const conn = cap.connections[id];
+
+        const alias = conn[role] + (all?(' (' + id + ')'):'');
+        const props = conns[id].properties;
+
+        // Show properties
+        const properties = {};
+
+        if (all) {
+          for (const name in props)
+            properties[name] = props[name];
+        }
+        capability[alias] = properties;
+      }
+      context[profile] = capability;
+    }
+    node[name] = context;
+  }
+
+  // Output result
+  display('map/node', 'node', node);
 }
 
 // Show current path
 function pwd() {
-  print(system.path);
+  display('pwd', 'pwd', system.path);
 }
 
 // Change working path
@@ -1054,7 +1139,7 @@ async function invoke(arg1, arg2, arg3) {
     value);
 
   // Output result
-  display('data', res);
+  display(path, 'data', res);
 }
 
 // Invoke profile
@@ -1068,7 +1153,7 @@ async function profile(arg1) {
     path);
 
   // Output result
-  display('data', res);
+  display(path, 'data', res);
 }
 
 // Add capability
@@ -1088,7 +1173,7 @@ async function add(arg1, arg2, arg3) {
     data);
 
   // Output result
-  display('data', res);
+  display(path, 'data', res);
 }
 
 // Remove capability
@@ -1102,7 +1187,7 @@ async function remove(arg1) {
     path);
 
   // Output result
-  display('data', res);
+  display(path, 'data', res);
 }
 
 // Invoke get
@@ -1115,7 +1200,7 @@ async function get(arg1) {
     path);
 
   // Output result
-  display('data', res);
+  display(path, 'data', res);
 }
 
 // Invoke post
@@ -1130,7 +1215,7 @@ async function set(arg1, arg2) {
     data);
 
   // Output result
-  display('data', res);
+  display(path, 'data', res);
 }
 
 // Subscribe to context
@@ -1219,8 +1304,7 @@ async function on() {
   }
 
   // Subscribe to context
-//  if (server === undefined)
-    await subscribe();
+  await subscribe();
 
   // Get name and command
   const name = argument(args.shift());
@@ -1278,7 +1362,7 @@ function curl(arg1, arg2, arg3) {
     return getData(result);
   })
   .then((result) => {
-    display('data', result);
+    display('data', 'data', result);
   });
 
 
@@ -1423,55 +1507,29 @@ async function exit(arg1) {
   process.exit(code);
 }
 
-//
-function mapout(all, name, data, changes) {
-  // Show contexts
-  const node = {};
-  const cons = changes.contexts;
-
-  for (const id in cons) {
-    const con = data.contexts[id];
-
-    const name = con.name + (all?(' (' + id + ')'):'');
-    const caps = cons[id].capabilities;
-
-    // Show capabilities
-    const context = {};
-
-    for (const profile in caps) {
-      const cap = con.capabilities[profile];
-
-      const role = profile.endsWith(':provider')?'consumer':'provider';
-      const conns = caps[profile].connections;
-
-      // Show connections
-      const capability = {};
-
-      for (const id in conns) {
-        const conn = cap.connections[id];
-
-        const alias = conn[role] + (all?(' (' + id + ')'):'');
-        const props = conns[id].properties;
-
-        // Show properties
-        const properties = {};
-
-        if (all) {
-          for (const name in props)
-            properties[name] = props[name];
-        }
-        capability[alias] = properties;
-      }
-      context[profile] = capability;
-    }
-    node[name] = context;
-  }
-  return node;
-}
-
 // Format output
-function display(path, value) {
-  const root = path.split('/').pop();
+function display(path, root, value) {
+  const parts = path.split('/');
+
+  // Pipe to socket
+  if (pipe !== undefined) {
+    var data = value;
+
+    if (path.startsWith('/')) parts.shift();
+    if (path.endsWith('/')) parts.pop();
+
+    while(parts.length > 0) {
+      const level = {};
+      level[parts.pop()] = data;
+      data = level;
+    }
+
+    pipe.send(JSON.stringify(data));
+    return;
+  }
+
+  // Format and display
+//  const root = block;//parts.pop();
   const text = format(root, value).trimEnd();
 
   if (text !== '') print(text);
@@ -1534,7 +1592,7 @@ function table(root, value) {
       var v = value[name];
 
       if (typeof v === 'object')
-        v = Object.keys(v).join(', ');
+        v = Object.keys(v).join(', ');  // '\n');
 
       t.push([name, v]);
     }
@@ -1740,26 +1798,33 @@ async function start() {
   }
 
   // Now online
-  stats.connection = 'online';
+//  stats.connection = 'online';
 }
 
 // Stop Dapr client
 async function stop() {
   // Stop client
   if (client !== undefined) {
-    await client.stop();
-    debug('client stopped');
-
+    if (client.daprClient.isInitialized) {
+      await client.stop();
+      debug('client stopped');
+    }
     client = undefined;
   }
 
   // Now offline
-  stats.connection = 'offline';
+//  stats.connection = 'offline';
 }
 
 // Update Dapr topic
 async function update(data) {
   try {
+    //
+    for (const socket of sockets) {
+
+    }
+
+    //
     if (change !== undefined)
       change(data);
 
@@ -1773,8 +1838,7 @@ async function update(data) {
       }
     }
 
-    display('data', data);
-
+    display('data', 'data', data);
   } catch(e) {
     // Failure
     error(e);
@@ -1800,18 +1864,18 @@ async function request(method, endpoint, data) {
       data);
   } catch(e) {
     // Failure
-    stats.errors++;
+//    stats.errors++;
     throw new Error(E_INVOKE);
   }
 
   // Response error?
   if (res.error !== undefined) {
-    stats.errors++;
+//    stats.errors++;
     throw new Error(res.error);
   }
 
   // Update stats
-  switch (method) {
+/*  switch (method) {
     case dapr.HttpMethod.GET:
       stats.reads++;
       break;
@@ -1820,7 +1884,7 @@ async function request(method, endpoint, data) {
     case dapr.HttpMethod.DELETE:
       stats.writes++;
       break;
-  }
+  }*/
   return res.data;
 }
 

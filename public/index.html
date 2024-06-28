@@ -14,114 +14,90 @@
   <title>CNS Dashboard</title>
 </head>
 <body>
-  <main>
+  <main id="offline">
     <header><i>dashboard</i>CNS Dashboard</header>
-    <article nav="home">
-      <nav state="collapse">
-        <button id="collapse" ripple><i>chevron_right</i></button>
-        <button id="expand" ripple><i>chevron_left</i></button>
-        <button id="home" ripple><i>home</i><span>Overview</span></button>
+    <article>
+      <center><sub/></center>
+    </article>
+    <footer>Initializing...</footer>
+  </main>
+  <main id="online" hidden>
+    <header><i>dashboard</i>CNS Dashboard</header>
+    <article>
+      <nav list="collapse">
+        <button id="list" ripple><i>chevron_left</i></button>
+        <button id="overview" ripple selected><i>home</i><span>Overview</span></button>
+        <button id="contexts" ripple><i>real_estate_agent</i><span>Contexts</span></button>
         <button id="apps" ripple><i>apps</i><span>Applications</span></button>
         <button id="config" ripple><i>build</i><span>Configuration</span></button>
-        <span></span>
+        <div></div>
         <button id="about" ripple><i>info</i><span>About</span></button>
-        <button id="light" ripple><i>nights_stay</i><span>Dark Theme</span></button>
-        <button id="dark" ripple><i>wb_sunny</i><span>Light Theme</span></button>
+        <button id="theme" ripple><i>dark_mode</i><span>Dark Theme</span></button>
       </nav>
-      <section nav="home">
+      <section view="overview">
         <h1>Overview</h1>
-        <h2>Node</h2>
-        <table>
-          <tr>
-            <th>Version</th>
-            <th>Broker</th>
-            <th>Started</th>
-            <th>Reads</th>
-            <th>Writes</th>
-            <th>Updates</th>
-            <th>Errors</th>
-            <th>Connection</th>
-          </tr>
-          <tr>
-            <td>1.1.0</td>
-            <td>Padi</td>
-            <td>2024-06-05T17:44:00.957Z</td>
-            <td>32</td>
-            <td>8</td>
-            <td>2</td>
-            <td>0</td>
-            <td>ONLINE</td>
-          </tr>
-        </table>
-        <h2>Contexts</h2>
-        <table>
-          <tr>
-            <th>Name</th>
-            <th>Title</th>
-            <th>Comment</th>
-            <th>Context ID</th>
-          </tr>
-          <tr>
-            <td>Local IBB</td>
-            <td>test1</td>
-            <td></td>
-            <td>IcE3x5xwsyP64GoLEZfZ</td>
-          </tr>
-        </table>
-        <h2>Capabilities</h2>
-        <table>
-          <tr>
-            <th>Profile</th>
-            <th>Title</th>
-            <th>Comment</th>
-          </tr>
-          <tr>
-            <td><a href="https://cp.padi.io/profiles/kubecns.control" target="_blank">cp:kubecns.control.v1:provider</a></td>
-            <td>CNS Kube Control</td>
-            <td>Allows CNS to be used to control Kubernetes through Helm. ADuss 2023-08-21</td>
-          </tr>
-          <tr>
-            <td><a href="https://cp.padi.io/profiles/padi.dataset" target="_blank">cp:padi.dataset.v1:provider</a></td>
-            <td>Dataset</td>
-            <td>Definition of a data set used by the Chart App.</td>
-          </tr>
-        </table>
-        <h2>Connections</h2>
-        <table>
-          <tr>
-            <th>Capability</th>
-            <th>Provider</th>
-            <th>Consumer</th>
-            <th>Status</th>
-            <th>Connection ID</th>
-          </tr>
-          <tr>
-            <td>cp:kubecns.control.v1:provider</td>
-            <td>Local IBB</td>
-            <td>Edge Central</td>
-            <td>new</td>
-            <td>vG8XHtNdfd5QvAkL2nGe</td>
-          </tr>
-          <tr>
-            <td>cp:padi.dataset.v1:provider</td>
-            <td>Local IBB</td>
-            <td>Chart</td>
-            <td>new</td>
-            <td>ubcMmlEklEH45puTCpMa</td>
-          </tr>
-        </table>
+        <div></div>
       </section>
-      <section nav="apps">
+      <section view="apps" hidden>
         <h1>Applications</h1>
+        <div></div>
       </section>
-      <section nav="config">
+      <section view="contexts" hidden>
+        <h1>Contexts</h1>
+        <div></div>
+      </section>
+      <section view="capabilities" hidden>
         <h1>Configuration</h1>
+        <div></div>
+        <h2>Add Capability</h2>
+        <form id="cap-form">
+          <label>Enter profile name:</label>
+          <input type="text" placeholder="cp:example.profile.name.v1"/>
+          <select>
+            <option value="provider">Provider</option>
+            <option value="consumer">Consumer</option>
+          </select>
+          <button icon primary><i>add</i></button>
+        </form>
+        <br/>
+        <button raised primary><i>add</i>Add Capability</button>
       </section>
-      <section nav="about">
+      <section view="connections" hidden>
+        <h1>Configuration</h1>
+        <div></div>
+      </section>
+      <section view="properties" hidden>
+        <h1>Configuration</h1>
+        <div></div>
+      </section>
+      <section view="profiles" hidden>
+        <h1>Profiles</h1>
+        <h2>Search</h2>
+        <form id="profiles-form">
+          <label>Enter profile name:</label>
+          <input id="profile" type="text" placeholder="cp:example.profile.name.v1"/>
+          <button id="fetch" icon primary><i>keyboard_return</i></button>
+        </form>
+        <div></div>
+      </section>
+      <section view="config" hidden>
+        <h1>Configuration</h1>
+        <h2>Command</h2>
+        <form id="command-form">
+          <label>Enter CLI command:</label>
+          <input id="command" type="text" placeholder="Type &quot;help&quot; for more information."/>
+          <button id="send" icon primary><i>keyboard_return</i></button>
+        </form>
+        <div></div>
+      </section>
+      <section view="about" hidden>
         <h1>About</h1>
+        <h2>CNS Dashboard</h2>
+        <p>Version <span id="version">-</span></p>
+        <p>Copyright 2024, Padi Inc.<br/>All rights reserved.</p>
       </section>
     </article>
-    <footer>node/contexts/IcE3x5xwsyP64GoLEZfZ<span>ONLINE</span></footer>
+    <footer><span id="path"></span></footer>
   </main>
 </body>
 </html>
