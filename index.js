@@ -647,7 +647,7 @@ function help() {
   print('  network [-l] [name]           Display network properties');
   print('  status [name]                 Display status properties');
   print('  whoami                        Display current context');
-  print('  token [text]                  Display token properties');
+  print('  token [string]                Display token properties');
   print('  dashboard [port]              Start dashboard server');
   print('  serve [path] [port]           Start http server');
   print('  connect                       Connect to CNS Dapr');
