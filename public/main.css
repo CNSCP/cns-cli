@@ -1,5 +1,5 @@
 /* main.css - CNS Dashboard */
-/* Copyright 2024 Padi, Inc. All Rights Reserved. */
+/* Copyright 2025 Padi, Inc. All Rights Reserved. */
 
 @charset "utf-8";
 
@@ -173,6 +173,7 @@ input {
 }
 
 input[type="text"],
+input[type="password"],
 input[type="email"],
 input[type="url"] {
   font-family: var(--font);
@@ -187,12 +188,14 @@ input[type="url"] {
 }
 
 input[type="text"]:focus-visible,
+input[type="password"]:focus-visible,
 input[type="email"]:focus-visible,
 input[type="url"]:focus-visible {
   border-color: var(--focus);
 }
 
 input[type="text"]:invalid,
+input[type="password"]:invalid,
 input[type="email"]:invalid,
 input[type="url"]:invalid {
   border-color: #ff5252;
@@ -370,6 +373,7 @@ nav button i {
 
 nav button span {
   font-size: 18px;
+  white-space: nowrap;
   padding-right: 64px;
 }
 
@@ -590,6 +594,7 @@ form button {
 }
 
 input[type="text"],
+input[type="password"],
 input[type="email"],
 input[type="url"],
 textarea {

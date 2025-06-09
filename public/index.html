@@ -1,7 +1,7 @@
 <!doctype html>
 
 <!-- index.html - CNS Dashboard -->
-<!-- Copyright 2024 Padi, Inc. All Rights Reserved. -->
+<!-- Copyright 2025 Padi, Inc. All Rights Reserved. -->
 
 <html lang="en">
 <head>
@@ -27,9 +27,11 @@
       <nav list="collapse">
         <button id="list" ripple><i>chevron_left</i></button>
         <button id="overview" ripple selected><i>home</i><span>Overview</span></button>
-        <button id="contexts" ripple><i>real_estate_agent</i><span>Contexts</span></button>
-        <button id="apps" ripple><i>apps</i><span>Applications</span></button>
-        <button id="config" ripple><i>build</i><span>Configuration</span></button>
+        <button id="config" ripple><i>settings</i><span>Configuration</span></button>
+        <button id="network" ripple><i>wifi</i><span>Network</span></button>
+        <button id="profiles" ripple><i>fingerprint</i><span>Profiles</span></button>
+        <button id="nodes" ripple><i>real_estate_agent</i><span>Nodes</span></button>
+        <button id="console" ripple><i>build</i><span>Console</span></button>
         <div></div>
         <button id="about" ripple><i>info</i><span>About</span></button>
         <button id="theme" ripple><i>dark_mode</i><span>Dark Theme</span></button>
@@ -37,51 +39,55 @@
       <section view="overview">
         <h1>Overview</h1>
         <div></div>
-      </section>
-      <section view="apps" hidden>
-        <h1>Applications</h1>
+        <h2>Notifications</h2>
         <div></div>
       </section>
-      <section view="contexts" hidden>
-        <h1>Contexts</h1>
-        <div></div>
-      </section>
-      <section view="capabilities" hidden>
+      <section view="config" hidden>
         <h1>Configuration</h1>
-        <div></div>
-        <h2>Add Capability</h2>
-        <form id="cap-form">
-          <label>Enter profile name:</label>
-          <input type="text" placeholder="cp:example.profile.name.v1"/>
-          <select>
-            <option value="provider">Provider</option>
-            <option value="consumer">Consumer</option>
-          </select>
-          <button icon primary><i>add</i></button>
+        <h2>Properties</h2>
+        <form id="config-form">
+          <label>CNS Host:</label>
+          <input id="config-host" type="text" placeholder="127.0.0.1"/>
+          <label>CNS Port:</label>
+          <input id="config-port" type="text" placeholder="2379"/>
+          <label>Username:</label>
+          <input id="config-username" type="text" placeholder="root"/>
+          <label>Password:</label>
+          <input id="config-password" type="text"/>
+          <button id="x1" primary>Re-Connect</button>
         </form>
-        <br/>
-        <button raised primary><i>add</i>Add Capability</button>
       </section>
-      <section view="connections" hidden>
-        <h1>Configuration</h1>
-        <div></div>
-      </section>
-      <section view="properties" hidden>
-        <h1>Configuration</h1>
-        <div></div>
+      <section view="network" hidden>
+        <h1>Network</h1>
+        <h2>Properties</h2>
+        <form id="network-form">
+          <label>Network Name:</label>
+          <input id="network-name" type="text" placeholder="My Network"/>
+          <label>Network Orchestrator:</label>
+          <input id="network-orchestrator" type="text" placeholder="contexts"/>
+          <label>Access Token:</label>
+          <input id="network-token" type="text"/>
+          <button id="x2" primary>Update</button>
+        </form>
       </section>
       <section view="profiles" hidden>
         <h1>Profiles</h1>
         <h2>Search</h2>
         <form id="profiles-form">
           <label>Enter profile name:</label>
-          <input id="profile" type="text" placeholder="cp:example.profile.name.v1"/>
+          <input id="profile" type="text" placeholder="example.profile.name.v1"/>
           <button id="fetch" icon primary><i>keyboard_return</i></button>
         </form>
+        <h2>Avaliable</h2>
+        <h2>Installed</h2>
         <div></div>
       </section>
-      <section view="config" hidden>
-        <h1>Configuration</h1>
+      <section view="nodes" hidden>
+        <h1>Nodes</h1>
+        <div></div>
+      </section>
+      <section view="console" hidden>
+        <h1>Console</h1>
         <h2>Command</h2>
         <form id="command-form">
           <label>Enter CLI command:</label>
@@ -94,7 +100,7 @@
         <h1>About</h1>
         <h2>CNS Dashboard</h2>
         <p>Version <span id="version">-</span></p>
-        <p>Copyright 2024, Padi Inc.<br/>All rights reserved.</p>
+        <p>Copyright 2025, Padi Inc.<br/>All rights reserved.</p>
       </section>
     </article>
     <footer><span id="path"></span></footer>

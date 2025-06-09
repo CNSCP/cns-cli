@@ -1,5 +1,5 @@
 // main.js - CNS Dashboard
-// Copyright 2024 Padi, Inc. All Rights Reserved.
+// Copyright 2025 Padi, Inc. All Rights Reserved.
 
 // Application
 
@@ -34,36 +34,35 @@ function exit() {
 
 // Handle click
 function click(e) {
-  const parts = target(e).split('-');
+  const id = target(e);
 
-  const name = parts[0];
-  const id = parts[1];
-
-  switch (name) {
+  switch (id) {
     case 'list':
       setList(toggle('#online nav', 'list', 'collapse', 'expand'));
       break;
     case 'overview':
-    case 'contexts':
-    case 'apps':
     case 'config':
+    case 'network':
+    case 'profiles':
+    case 'nodes':
+    case 'console':
     case 'about':
-      setView(name);
+      setView(id);
       break;
     case 'theme':
       setTheme(toggle('body', 'theme', 'light', 'dark'));
       break;
-/*
-    case 'context':
-      setView('capabilities');
+  }
+}
+
+// Handle input change
+function change(e) {
+  const id = target(e);
+
+  switch (id) {
+    case 'network-name':
+      command('put cns/network/name "' + value('#' + id) + '"');
       break;
-    case 'capability':
-      setView('connections');
-      break;
-    case 'properties':
-      setView('properties');
-      break;
-*/
   }
 }
 
@@ -72,6 +71,7 @@ function submit(e) {
   const id = target(e);
 
   switch (id) {
+/*
     case 'profiles-form':
       const name = value('#profile');
       if (name === '')
@@ -81,14 +81,15 @@ function submit(e) {
         value('#profile', '');
       }
       break;
+*/
     case 'command-form':
       const cmd = value('#command');
-      if (cmd === '')
-        focus('#command');
-      else {
-        command(cmd);
-        value('#command', '');
-      }
+
+      if (cmd === '') focus('#command');
+      else command(cmd);
+
+      value('#command', '');
+      html('section[view="console"]:not([hidden]) div', '');
       break;
   }
   return false;
@@ -160,19 +161,23 @@ function radio(selector, attr, name, value) {
   }
 }
 
+
+function connstate(state) {
+  return (state === 'online')?'Online':'<span error>Offline</span>';
+}
+
+
 // Update with changes
 function update(changes) {
-  const root = cache || {};
+  const c = cache || {};
 
-  const node = root.node || {};
-  const status = node.status || {};
-  const contexts = node.contexts || {};
-  const profiles = root.profiles || {};
+  const version = c.version || '';
+  const config = c.config || {};
+  const stats = c.stats || {};
+  const keys = c.keys || {};
 
-  var state = status.connection || 'offline';
-
-  if (state === 'offline')
-    state = '<span error>offline</span>';
+  const state = connstate(stats.connection);
+  const network = keys['cns/network/name'];
 
   var list1 = '';
   var list2 = '';
@@ -183,21 +188,20 @@ function update(changes) {
   var list7 = '';
   var list8 = '';
 
-  var results = '';
-
   list1 =
     '<tr>' +
-      '<td>' + sanitize(node.version) + '</td>' +
-      '<td>' + sanitize(node.broker) + '</td>' +
-      '<td>' + sanitize(status.started) + '</td>' +
-      '<td>' + sanitize(status.reads) + '</td>' +
-      '<td>' + sanitize(status.writes) + '</td>' +
-      '<td>' + sanitize(status.updates) + '</td>' +
-      '<td>' + sanitize(status.errors) + '</td>' +
-      '<td>' + state + '</td>' +
+      '<td>' + sanitize(version) + '</td>' +
+      '<td>' + sanitize(network) + '</td>' +
+      '<td>' + sanitize(stats.started) + '</td>' +
+      '<td>' + sanitize(stats.reads) + '</td>' +
+      '<td>' + sanitize(stats.writes) + '</td>' +
+      '<td>' + sanitize(stats.updates) + '</td>' +
+      '<td>' + sanitize(stats.errors) + '</td>' +
+      '<td>' + sanitize(state) + '</td>' +
     '</tr>';
 
-  if (state === 'online') {
+  if (state === 'Online') {
+/*
     list3 =
       '<tr>' +
         '<td style="width:100%">node</td>' +
@@ -279,8 +283,10 @@ function update(changes) {
           }
         }
       }
+*/
     }
 
+/*
     for (const name in profiles) {
       const profile = profiles[name];
       const url = profile.definition;
@@ -293,7 +299,8 @@ function update(changes) {
           '<td><a href="' + url + '" target="_blank">' + url + '</a></td>' +
         '</tr>';
     }
-  }
+*/
+//  }
 
     //
     /*
@@ -307,12 +314,21 @@ function update(changes) {
     }
     */
 
-    text('#version', sanitize(root.version));
-    text('#path', sanitize(root.pwd));
+    text('#version', sanitize(version));
+    text('#path', sanitize(network));
+//    text('#path', sanitize(root.pwd));
 //  }
 
-  if (changes !== undefined)
-    results = JSON.stringify(changes, null, 2);
+
+  var results = '';
+
+  const ch = changes || {};
+  const response = ch.response;
+
+  if (response !== undefined)
+    results = escapeHtml(response);//JSON.stringify(response, null, 2);
+
+//  delete root.response;
 
   if (list1 !== '') {
     list1 =
@@ -320,7 +336,7 @@ function update(changes) {
       '<table>' +
         '<tr>' +
           '<th>Version</th>' +
-          '<th>Broker</th>' +
+          '<th>Network</th>' +
           '<th>Started</th>' +
           '<th>Reads</th>' +
           '<th>Writes</th>' +
@@ -420,26 +436,30 @@ function update(changes) {
 
   if (results !== '') {
     results =
-      '<h2>Result</h2>' +
+      '<h2>Response</h2>' +
       '<aside>' +
         '<pre>' + results + '</pre>' +
       '</aside>';
   }
 
   html('section[view="overview"] div', list1 + list2 + list3);
-  html('section[view="contexts"] div', list4);
-  html('section[view="capabilities"] div', list5);
-  html('section[view="connections"] div', list6);
-  html('section[view="properties"] div', list7);
-  html('section[view="profiles"] div', list8);
+//  html('section[view="contexts"] div', list4);
+//  html('section[view="capabilities"] div', list5);
+//  html('section[view="connections"] div', list6);
+//  html('section[view="properties"] div', list7);
+//  html('section[view="profiles"] div', list8);
 
-  html('section[view="config"]:not([hidden]) div', results);
-}
+  value('#config-host', config.CNS_HOST || '');
+  value('#config-port', config.CNS_PORT || '');
+  value('#config-username', config.CNS_USERNAME || '');
+  value('#config-password', config.CNS_PASSWORD || '');
 
-// Clear node cache
-function reset() {
-  cache = undefined;
-  update();
+  value('#network-name', keys['cns/network/name'] || '');
+  value('#network-orchestrator', keys['cns/network/orchestrator'] || '');
+  value('#network-token', keys['cns/network/token'] || '');
+
+  if (results !== '')
+    html('section[view="console"]:not([hidden]) div', results);
 }
 
 // Build table from data
@@ -487,6 +507,14 @@ function sanitize(value) {
   return (value === undefined)?'-':value;
 }
 
+// Escape html characters
+function escapeHtml(value) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+}
+
 // Socket connection
 
 // Connect to host
@@ -524,8 +552,6 @@ function establish(e) {
   // Now online
   hidden('#offline', true);
   hidden('#online', false);
-
-  command('version; pwd; get /node');
 }
 
 // Receive from host
@@ -533,9 +559,15 @@ function receive(packet) {
   // Convert data
   const changes = JSON.parse(packet.data);
 
+console.log(changes);
+
   // Merge changes with current
-  if (cache === undefined) cache = {};
-  merge(cache, changes);
+//  if (cache === undefined) cache = {};
+
+  if (changes.response === undefined)
+    cache = changes;
+
+//  merge(cache, changes);
 
   // Update changes
   update(changes);
@@ -584,14 +616,21 @@ function disconnect() {
   reset();
 }
 
+// Clear node cache
+function reset() {
+  cache = undefined;
+  update();
+}
+
 // Object functions
 
 // Check object type
-function isObject(obj, type = 'Object') {
-  return Object.prototype.toString.call(obj) === '[object ' + type + ']';
-}
+//function isObject(obj, type = 'Object') {
+//  return Object.prototype.toString.call(obj) === '[object ' + type + ']';
+//}
 
 // Merge source into target
+/*
 function merge(target, source) {
   // Must be objects
   if (!isObject(target) || !isObject(source))
@@ -615,6 +654,7 @@ function merge(target, source) {
     }
   }
 }
+*/
 
 // Storage functions
 
@@ -757,6 +797,7 @@ onload = init;
 onunload = exit;
 
 onclick = click;
+onchange = change;
 onsubmit = submit;
 
 // Exports
