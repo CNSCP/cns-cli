@@ -27,7 +27,7 @@
   --hover: #f0f0f0;
   --hilight: #0d2192;
   --focus: #0d2192;
-  --error: #ff4081;
+  --error: #af0606;
 }
 
 body[theme="dark"] {
@@ -42,7 +42,7 @@ body[theme="dark"] {
   --hover: #505050;
   --hilight: #ffffff;
   --focus: #2196f3;
-  --error: #ff4081;
+  --error: #ed4337;
 }
 
 html {
@@ -67,18 +67,35 @@ main {
 h1 {
   font-size: 24px;
   font-weight: 400;
-  margin: 0;
+  margin: 0 0 16px 0;
 }
 
 h2 {
   font-size: 20px;
   font-weight: 400;
-  margin: 32px 0 16px 0;
+  margin: 0 0 16px 0;
+}
+
+h3 {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0;
+}
+
+h4 {
+  font-size: 18px;
+  font-weight: 400;
+  margin: 0 0 16px 0;
 }
 
 p {
   font-size: 14px;
-  margin: 16px 0;
+  line-height: 24px;
+  margin: 0 0 16px 0;
+}
+
+p:last-of-type {
+  margin: 0;
 }
 
 pre {
@@ -105,6 +122,7 @@ a:focus-visible {
 button {
   font-family: var(--font);
   font-size: 14px;
+  white-space: nowrap;
   align-items: center;
   text-transform: uppercase;
   background-color: transparent;
@@ -145,6 +163,11 @@ button+button {
   margin-left: 8px;
 }
 
+h1 button {
+  float: right;
+}
+
+/*
 h2 button {
   font-size: inherit;
   text-transform: none;
@@ -154,7 +177,7 @@ h2 button {
 h2 button:hover {
   background-color: transparent;
   color: var(--hilight);
-}
+}*/
 
 label {
   font-size: 12px;
@@ -451,7 +474,8 @@ section {
   overflow: scroll;
   box-sizing: border-box;
   width: 100%;
-  padding: 40px 64px 56px 64px;
+  padding: 40px 64px;
+  min-width: 600px;
 }
 
 aside {
@@ -460,13 +484,25 @@ aside {
   box-sizing: border-box;
   box-shadow: 0 5px 5px -3px rgba(0, 0, 0, 0.2), 0 8px 10px 1px rgba(0, 0, 0, 0.14), 0 3px 14px 2px rgba(0, 0, 0, 0.12);
   padding: 20px;
+  margin-bottom: 16px;
+}
+
+aside:has(table) {
+  padding: 0;
+}
+
+aside:empty {
+  display: none;
 }
 
 form {
+/*
   background-color: var(--table);
+*/
   box-sizing: border-box;
-  box-shadow: 0 5px 5px -3px rgba(0, 0, 0, 0.2), 0 8px 10px 1px rgba(0, 0, 0, 0.14), 0 3px 14px 2px rgba(0, 0, 0, 0.12);
-  padding: 13px 20px 21.5px 20px;
+/*  box-shadow: 0 5px 5px -3px rgba(0, 0, 0, 0.2), 0 8px 10px 1px rgba(0, 0, 0, 0.14), 0 3px 14px 2px rgba(0, 0, 0, 0.12);*/
+/*  padding: 20px;*/
+/*  margin: 0 0 16px 0;*/
 }
 
 form input:has(+button[icon]),
@@ -477,8 +513,9 @@ form select:has(+button[icon]) {
 
 table {
   background-color: var(--table);
-  box-shadow: 0 5px 5px -3px rgba(0, 0, 0, 0.2), 0 8px 10px 1px rgba(0, 0, 0, 0.14), 0 3px 14px 2px rgba(0, 0, 0, 0.12);
+/*  box-shadow: 0 5px 5px -3px rgba(0, 0, 0, 0.2), 0 8px 10px 1px rgba(0, 0, 0, 0.14), 0 3px 14px 2px rgba(0, 0, 0, 0.12);*/
   border-collapse: collapse;
+/*  margin: 0 0 15px 0;*/
   width: 100%;
 }
 
@@ -489,33 +526,65 @@ table tr {
 table th {
   font-size: 12px;
   font-weight: 400;
+  white-space: nowrap;
   text-align: left;
+  vertical-align: bottom;
   color: var(--header);
-  padding: 4px 20px;
+  padding: 10px 20px;
 }
 
 table td {
   font-size: 14px;
+  white-space: nowrap;
   padding: 4px 20px;
 }
 
+/*
 table td span,
 table td a {
   white-space: nowrap;
 }
+*/
+/*
+table td button span {
+  padding-left: 16px;
+}
+*/
 
-table td button {
+table td:first-of-type:has(button[icon]) {
+  padding-right: 0;
+}
+
+/*table td button {
   margin: 0;
   visibility: hidden;
-}
+}*/
 
-table tr:hover td button {
+/*table tr:hover td button {
   visibility: visible;
+}*/
+
+table tr:not(:last-child) > th,
+table tr:not(:last-child) > td {
+  border-bottom: 1px solid var(--border);
 }
 
-table tr:not(:last-child) th,
-table tr:not(:last-child) td {
-  border-bottom: 1px solid var(--border);
+/*
+table tr[expand] {
+  background-color: var(--title);
+}*/
+
+table tr[expand] > td {
+  padding: 0;
+}
+
+table tr[expand] > td:first-child {
+  border-right: 1px solid var(--border);
+}
+
+table form {
+  white-space: wrap;
+  padding: 10px 20px 0 20px;
 }
 
 /* ----- */
@@ -534,8 +603,24 @@ main pre {
   color: var(--button);
 }
 
-[hidden] {
-  display: none;
+[online] {
+}
+
+[offline] {
+  font-size: 14px;
+  box-sizing: border-box;
+  background-color: var(--error);
+  color: white;
+  box-shadow: 0 5px 5px -3px rgba(0, 0, 0, 0.2), 0 8px 10px 1px rgba(0, 0, 0, 0.14), 0 3px 14px 2px rgba(0, 0, 0, 0.12);
+  margin: 0 0 16px 0;
+  padding: 0 20px;
+  line-height: 52px;
+  height: 52px;
+  width: 100%;
+}
+
+[offline] i {
+  margin-right: 16px;
 }
 
 [selected] {
@@ -558,6 +643,7 @@ main pre {
   color: var(--error);
 }
 
+/*
 [indent="1"] {
   text-indent: 16px;
 }
@@ -572,6 +658,64 @@ main pre {
 
 [indent="4"] {
   text-indent: 64px;
+}
+*/
+
+[hidden] {
+  display: none;
+}
+
+[disabled] {
+  color: var(--border) !important;
+  pointer-events: none;
+}
+
+[data-tip] {
+  position: relative;
+  transition: opacity 0.2s;
+}
+
+[data-tip]:before {
+  content: attr(data-tip);
+  font-size: 12px;
+  font-weight: 600;
+  position: absolute;
+  background: var(--border);
+  color: var(--text);
+  text-align: center;
+  text-transform: none;
+  white-space: nowrap;
+  border-radius: 4px;
+  box-shadow: 0 5px 5px 0 rgba(0, 0, 0, 0.25);
+  padding: 4px 8px;
+  opacity: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+[data-tip]:hover:before {
+  transition-delay: 0.8s;
+  opacity: 1;
+}
+
+[data-pos="top"]:before {
+  left: 50%;
+  transform: translate(-50%, -140%);
+}
+
+[data-pos="left"]:before {
+  right: 110%;
+  transform: translate(0, -15%);
+}
+
+[data-pos="bottom"]:before {
+  left: 50%;
+  transform: translate(-50%, 120%);
+}
+
+[data-pos="right"]:before {
+  left: 110%;
+  transform: translate(0, -15%);
 }
 
 /* Animation */

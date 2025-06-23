@@ -3,8 +3,6 @@
 // index.js - CNS Command line
 // Copyright 2025 Padi, Inc. All Rights Reserved.
 
-// display obj with child._name as value (ignore if not list?)
-
 'use strict';
 
 // Imports
@@ -15,6 +13,7 @@ const etcd = require('etcd3');
 const readline = require('readline');
 const tables = require('table');
 const colours = require('colors');
+const short = require('short-uuid');
 const express = require('express');
 const expressws = require('express-ws');
 const compression = require('compression');
@@ -34,9 +33,15 @@ const E_MISSING = 'Missing argument';
 const E_COMMAND = 'Illegal command';
 const E_ARGUMENT = 'Invalid argument';
 const E_VARIABLE = 'Invalid variable';
+const E_PERIOD = 'Invalid period';
 const E_MISSMATCH = 'Type missmatch';
 const E_CONFIG = 'Not configured';
+const E_AVAILABLE = 'Not available';
 const E_CONNECT = 'Not connected';
+const E_FOUND = 'Not found';
+const E_USERS = 'Failed to get users';
+const E_ROLES = 'Failed to get roles';
+const E_INSTALL = 'Failed to install';
 const E_WATCH = 'Failed to watch';
 const E_LIST = 'Failed to list';
 const E_GET = 'Failed to get';
@@ -46,34 +51,57 @@ const E_PURGE = 'Failed to purge';
 const E_SPAWN = 'Failed to spawn';
 const E_READ = 'Failed to read';
 const E_WRITE = 'Failed to write';
+//const E_ABORT = 'Aborted.';
+
+// Constants
+
+const HOME = 'cns/network';
+
+const DATE_SHORT = {day: '2-digit', month: '2-digit', year: 'numeric'};
+const DATE_LONG = {weekday: 'short', day: 'numeric', month: 'short', year: 'numeric'};
+
+const TIME_SHORT = {hour: '2-digit', minute: '2-digit'};
+const TIME_LONG = {hour: 'numeric', minute: '2-digit', hour12: true};
 
 // Defaults
 
 const defaults = {
-  CNS_HOST: '127.0.0.1',
-  CNS_PORT: '2379',
-  CNS_USERNAME: 'root',
-  CNS_PASSWORD: ''
+  host: '127.0.0.1',
+  port: '2379',
+  username: '',
+  password: ''
 };
 
 // Configuration
 
 const config = {
-  CNS_HOST: process.env.CNS_HOST || defaults.CNS_HOST,
-  CNS_PORT: process.env.CNS_PORT || defaults.CNS_PORT,
-  CNS_USERNAME: process.env.CNS_USERNAME || defaults.CNS_USERNAME,
-  CNS_PASSWORD: process.env.CNS_PASSWORD || defaults.CNS_PASSWORD
+  host: process.env.CNS_HOST || defaults.host,
+  port: process.env.CNS_PORT || defaults.port,
+  username: process.env.CNS_USERNAME || defaults.username,
+  password: process.env.CNS_PASSWORD || defaults.password
 };
 
 // Options
 
 const options = {
+  prompt: '\\w> ',
   format: 'tree',
   indent: 2,
   columns: 0,
   rows: 0,
   silent: false,
   debug: false
+};
+
+// System
+
+const system = {
+  name: os.hostname(),
+  address: 'unknown',
+  mask: 'unknown',
+  arch: os.arch(),
+  platform: os.platform(),
+  release: os.release()
 };
 
 // Stats
@@ -92,74 +120,77 @@ const stats = {
 const commands = {
   'help': help,
   'version': version,
-  'output': output,
-//  'device': device,
   'init': init,
   'config': configure,
+  'output': output,
+  'device': device,
   'status': status,
+  'dashboard': dashboard,
   'connect': connect,
-  'network': network,       // [name] [value]
+  'users': users,
+  'roles': roles,
+  'network': network,
+  'install': install,
   'profiles': profiles,
-  'nodes': nodes,           // [node] [name] [value]
-  'contexts': contexts,     // node [context] [name] [value]
+  'nodes': nodes,
+  'contexts': contexts,
   'provider': provider,
   'consumer': consumer,
-  'connections': connections,
-  // users
-  // roles
-  'map': map,       // [node] [context] [profile]
+  // connections [conn]
+  // sanitize
+  // optimize
+  // backup file
+  // restore file
+  'map': map,
   // top (changes)
-  'namespace': namespace,
-  'list': list,
+  'find': find,
+  'pwd': pwd,
+  'cd': cd,
+  'ls': ls,
   'get': get,
   'put': put,
   'del': del,
   'purge': purge,
-  // push (nodes to etcd server)
-  // pull (nodes from etcd server)
+  // log key
+  // push (network to etcd server)
+  // pull (network from etcd server)
+  // on error break|resume
+  // on key command
+  // every ms command
+  // clear
   'disconnect': disconnect,
-  'dashboard': dashboard,
   'cls': cls,
   'echo': echo,
+  'ask': ask,
+  // if expr command
+  // foreach command ($for)
+  // :label
+  // goto label
+  // gosub label
+  // return
+  // break
   'exec': exec,
   'curl': curl,
   'wait': wait,
   'history': history,
   'save': save,
   'load': load,
+  // run file
   'exit': exit,
   'quit': exit
 };
-
-//
-/*
-const CONNECTED = 0x01;
-const SINGLE = 0x02;
-const DOUBLE = 0x04;
-
-const flags = {
-  'network': CONNECTED,
-  'profiles': CONNECTED,
-  'nodes': CONNECTED,
-  'connections': CONNECTED,
-// etc
-  'echo': SINGLE,
-  'exec': SINGLE,
-  'curl': DOUBLE
-};
-*/
 
 // Shortcuts
 
 const shortcuts = {
   'h': 'help',
-  '?': 'help',
   'v': 'version',
   'i': 'init',
-  's': 'status',
-  'cd': 'namespace',
-  'ls': 'list',
+  'c': 'config',
   'o': 'output',
+  'd': 'device',
+  's': 'status',
+  '?': 'echo',
   'e': 'exit',
   'q': 'quit'
 };
@@ -173,20 +204,25 @@ var watcher;
 var server;
 var wss;
 var pipe;
-var response;
+var buffer;
 
 var terminal;
 var completions;
 var confirm;
 var signal;
+var reply;
 
-var ns;
+var namespace;
 
 // Local functions
 
 // Main entry point
 async function main(argv) {
   try {
+    // Update system
+    getAddress();
+    getMemory();
+
     // Parse options
     const cmds = parse(argv);
 
@@ -194,7 +230,7 @@ async function main(argv) {
       // Connect to key store?
       await connect();
     } catch(e) {
-      // Ignore
+      // Failure
     }
 
     // Process command?
@@ -224,28 +260,28 @@ function usage() {
   print('Usage: cns [options] [ script.cns ] [command]\n');
 
   print('Options:');
-  print('  -h, --help                    Output usage information');
-  print('  -v, --version                 Output version information');
-  print('  -H, --host                    Set network host');
-  print('  -P, --port                    Set network port');
-  print('  -u, --username                Set network username');
-  print('  -p, --password                Set network password');
-  print('  -o, --output format           Set output format');
-  print('  -i, --indent size             Set output indent size');
-  print('  -c, --columns size            Set output column limit');
-  print('  -r, --rows size               Set output row limit');
-  print('  -m, --monochrome              Disable console colours');
-  print('  -s, --silent                  Disable console output');
-  print('  -d, --debug                   Enable debug output\n');
+  phint('-h, --help', 'Output usage information');
+  phint('-v, --version', 'Output version information');
+  phint('-H, --host uri', 'Set network host');
+  phint('-P, --port number', 'Set network port');
+  phint('-u, --username string', 'Set network username');
+  phint('-p, --password string', 'Set network password');
+  phint('-o, --output format', 'Set output format');
+  phint('-i, --indent size', 'Set output indent size');
+  phint('-c, --columns size', 'Set output column limit');
+  phint('-r, --rows size', 'Set output row limit');
+  phint('-m, --monochrome', 'Disable console colours');
+  phint('-s, --silent', 'Disable console output');
+  phint('-d, --debug', 'Enable debug output\n');
 
   print('Commands:');
   help();
 
   print('\nEnvironment:');
-  print('  CNS_HOST                      Default network host');
-  print('  CNS_PORT                      Default network port');
-  print('  CNS_USERNAME                  Default network username');
-  print('  CNS_PASSWORD                  Default network password\n');
+  phint('CNS_HOST', 'Default network host');
+  phint('CNS_PORT', 'Default network port');
+  phint('CNS_USERNAME', 'Default network username');
+  phint('CNS_PASSWORD', 'Default network password\n');
 
   print('Documentation can be found at https://github.com/cnscp/cns-cli/');
 }
@@ -271,6 +307,7 @@ function parse(args) {
       if (arg.endsWith('.cns'))
         cmds.push('load "' + arg + '";');
       else cmds.push(arg);
+
       continue;
     }
 
@@ -291,22 +328,22 @@ function parse(args) {
       case '-H':
       case '--host':
         // Network host
-        config.CNS_HOST = next(arg, args);
+        config.host = next(arg, args);
         break;
       case '-P':
       case '--port':
         // Network port
-        config.CNS_PORT = next(arg, args);
+        config.port = next(arg, args);
         break;
       case '-u':
       case '--username':
         // Network user
-        config.CNS_USERNAME = next(arg, args);
+        config.username = next(arg, args);
         break;
       case '-p':
       case '--password':
         // Network password
-        config.CNS_PASSWORD = next(arg, args);
+        config.password = next(arg, args);
         break;
       case '-o':
       case '--output':
@@ -352,7 +389,7 @@ function parse(args) {
         throw new Error(E_OPTION + ': ' + arg);
     }
   }
-  return cmds.join(' ');
+  return cmds.join(' ').trim();
 }
 
 // Get next arg
@@ -365,7 +402,7 @@ function next(arg, args) {
 }
 
 // Open console
-function open() {
+function open(history) {
   // Make completions
   completions = Object.keys(commands).sort();
   confirm = false;
@@ -374,8 +411,9 @@ function open() {
   terminal = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
+    history: history,
     completer: completer,
-    prompt: cwd()
+    prompt: escape(options.prompt)
   })
   // Input line
   .on('line', async (line) => {
@@ -388,6 +426,9 @@ function open() {
       await command(line);
     } catch(e) {
       // Failure
+      stats.errors++;
+      broadcast();
+
       error(e);
     }
 
@@ -441,18 +482,15 @@ function completer(line) {
 
 // Output console prompt
 function prompt() {
-  if (terminal !== undefined &&
-    !options.silent)
+  if (terminal !== undefined && !options.silent)
     terminal.prompt();
 }
 
 // Suspend console
 function suspend() {
-  // Console open?
   var history;
 
   if (terminal !== undefined) {
-    // Keep history
     history = terminal.history;
     close();
   }
@@ -461,14 +499,10 @@ function suspend() {
 
 // Resume from suspend
 function resume(rl, history) {
-  // Close readline
   rl.close();
 
-  // Re-open terminal?
-  if (history !== undefined) {
-    open();
-    terminal.history = history;
-  }
+  if (history !== undefined)
+    open(history);
 }
 
 // Close console
@@ -481,6 +515,9 @@ function close() {
 
 // Parse command
 async function command(line) {
+  // Update system vars
+  getMemory();
+
   // Expression eval?
   if (line.startsWith('!')) {
     console.log(eval(line.substr(1)));
@@ -488,7 +525,7 @@ async function command(line) {
   }
 
   // Remove comments
-  line = line.split(/\s\/\/+(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/)[0];
+  line = line.split(/^\/\/+|\s\/\/+(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/)[0];
 
   // Split statements
   const statements = line.split(/;+(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/);
@@ -499,7 +536,7 @@ async function command(line) {
     if (part === '') continue;
 
     // Split args and remove quotes
-    const args = (part.match(/[^\s"]+|"([^"]*)"/g) || [])
+    const args = (part.match(/\?|[^\s"]+|"([^"]*)"/g) || [])
       .map((arg) => arg.replace(/^"(.*)"$/, '$1'));
 
     // Get command arg
@@ -514,8 +551,8 @@ async function command(line) {
 
     // Too many args?
     const len = args.length;
-// check flags
-    if (cmd !== 'echo' && len > fn.length)
+
+    if (cmd !== '?' && cmd !== 'echo' && cmd !== 'exec' && len > fn.length)
       throw new Error(E_ARGUMENT + ': ' + args[len - 1]);
 
     // Call command
@@ -545,64 +582,75 @@ function required(arg) {
   return value;
 }
 
-// Get path argument
-function location(arg) {
-  var loc = argument(arg, '');
+// Get time argument
+function period(arg) {
+  const value = argument(arg, '');
+  const parts = value.toString().split(/(\D+)/);
 
-  // Add current path
-  if (!loc.startsWith('~'))
-    loc = ns + '/' + loc;//((ns === '/')?'':'/') + loc;
+  const period = parts[0] | 0;
+  const units = parts[1] || '';
 
-  // Squiggle for home
-  if (loc.startsWith('~'))
-    loc = home() + loc.substr(1);
+  switch (units.toLowerCase()) {
+    case 'h': return period * 1000 * 60 * 60;
+    case 'm': return period * 1000 * 60;
+    case 's': return period * 1000;
+    case 'ms':
+    case '': return period;
+  }
 
-  // Normalize path
-  loc = path.normalize(loc);
-
-  // Remove trailing slash
-  if (loc.length > 1)
-    loc = loc.replace(/\/$/, '');
-
-  return loc;
-}
-
-// Get working path
-function cwd() {
-  return shorten(ns) + '> ';
-}
-
-// Get home path
-function home() {
-  return 'cns/network';
-}
-
-// Expand home path
-function expand(path) {
-  return path.replace('~', home());
-}
-
-// Shorten home path
-function shorten(path) {
-  return path.replace(home(), '~');
+  // Not valid
+  throw new Error(E_PERIOD + ': ' + arg);
 }
 
 // Variable substitution
 function variable(value) {
   var match;
 
-  // Found match?
-  while (match = value.match(/\$([\d\w_\/]+)/)) {
+  // Match variables
+  while (match = value.match(/\$([\d\w_]+)/)) {
     // Find variable
     const found = match[0];
     const name = match[1];
 
-    var data = config[name];
+    var data;
 
-    if (data === undefined) data = options[name];
-    if (data === undefined) data = stats[name];
-    if (data === undefined) data = cache[name];
-    if (data === undefined) data = process.env[name];
+    switch (name) {
+      case 'new':
+        // Short uuid
+        data = short.generate();
+        break;
+      case 'uuid':
+        // Long uuid
+        data = short.uuid();
+        break;
+      case 'rand':
+        // Random value (0 - 99)
+        data = (Math.random() * 100) | 0;
+        break;
+      case 'now':
+        // Timestamp
+        data = new Date().toISOString();
+        break;
+      case 'path':
+        // Current path
+        data = namespace;
+        break;
+      case 'ask':
+        // Ask reply
+        data = reply || '';
+        break;
+      default:
+        // Other vars
+// command line if numeric
+        data = process.env[name];
+
+        if (data === undefined) data = config[name];
+        if (data === undefined) data = options[name];
+        if (data === undefined) data = system[name];
+        if (data === undefined) data = stats[name];
+//        if (data === undefined) data = cache[name];
+        break;
+    }
 
     // Not found?
     if (data === undefined)
@@ -612,6 +660,106 @@ function variable(value) {
     value = value.replace(found, data);
   }
   return value;
+}
+
+// Escape code substitution
+function escape(value) {
+  var match;
+
+  // Match codes
+  while (match = value.match(/\\([uhHsvVwWAdDtT])/)) {
+    // Find code
+    const found = match[0];
+    const name = match[1];
+
+    var df;
+    var tf;
+
+    var data = '';
+
+    switch (name) {
+      case 'u': data = config.username; break;
+      case 'h': data = config.host.match(/^(.*?\:\/\/)?([^:]*)/)[2]; break;
+      case 'H': data = config.host; break;
+      case 's': data = pack.name; break;
+      case 'v': const v = pack.version.split('.'); v.pop(); data = v.join('.'); break;
+      case 'V': data = pack.version; break;
+      case 'w': data = shorten(namespace); break;
+      case 'W': data = namespace.split('/').pop(); break;
+//      case 'p': const ns = shorten(namespace), n = ns.split('/'); data = (n.length > 2)?(n.shift() + '/../' + n.pop()):ns; break;
+      case 'A': data = new Date().toISOString(); break;
+      case 'd': df = DATE_SHORT; break;
+      case 'D': df = DATE_LONG; break;
+      case 't': tf = TIME_SHORT; break;
+      case 'T': tf = TIME_LONG; break;
+    }
+
+    if (df) data = new Date().toLocaleDateString([], df).replaceAll(',', '').toUpperCase();
+    if (tf) data = new Date().toLocaleTimeString([], tf).replaceAll(',', '').toUpperCase();
+
+    // Replace with value
+    value = value.replaceAll(found, data);
+  }
+  return value;
+}
+
+// Get key path
+function location(loc) {
+  // Must have no wildcard
+  if (loc.includes('*'))
+    throw new Error(E_ARGUMENT);
+
+  return wildcard(loc);
+}
+
+// Get wildcard path
+function wildcard(loc) {
+  // Absolute path?
+  var absolute = loc.startsWith('/');
+  if (absolute) loc = loc.substr(1);
+
+  loc = expand(loc);
+
+  const parts = loc.split('/');
+
+  if (parts[0] === 'cns' && parts[1] === 'network')
+    absolute = true;
+
+  // Relative path?
+  if (!absolute) loc = (namespace?(namespace + '/'):'') + loc;
+
+  // Normalize path
+  loc = path.normalize(loc);
+  if (loc.startsWith('.')) loc = '';
+
+  // Remove trailing slash
+  return loc.replace(/\/$/, '');
+}
+
+// Expand home path
+function expand(loc) {
+  const parts = loc.split('/');
+
+  if (parts[0] === '~') {
+    parts.unshift('cns');
+    parts[1] = 'network';
+
+    return parts.join('/');
+  }
+  return loc;
+}
+
+// Shorten home path
+function shorten(loc) {
+  const parts = loc.split('/');
+
+  if (parts[0] === 'cns' && parts[1] === 'network') {
+    parts.shift();
+    parts[0] = '~';
+
+    return parts.join('/');
+  }
+  return loc;
 }
 
 // Get or set property
@@ -649,46 +797,48 @@ function cast(current, value) {
   throw new Error(E_MISSMATCH);
 }
 
-
-
-
-
-
-
 // Show help information
 function help() {
   // Output help
-  print('  help                          Output help information');
-  print('  version                       Output version information');
-  print('  init                          Initialize config file');
-  print('  config [name] [value]         Display or set config properties');
-  print('  output [name] [value]         Display or set output properties');
-  print('  status [name]                 Display status properties');
-  print('  connect                       Connect to network');
-  print('  network                       Configure network properties');
-  print('  profiles [profile]            Configure profile properties');
-  print('  nodes [node]                  Configure node properties');
-  print('  contexts node [context]       Configure context properties');
-  print('  provider node context [profile]   Configure provider properties');
-  print('  consumer node context [profile]   Configure consumer properties');
-  print('  connections node context      Display context connections');
-  print('  map                           Display network map');
-  print('  list [key]                    List key values');
-  print('  get key                       Get value of key');
-  print('  set key value                 Set value of key');
-  print('  del key                       Delete key entry');
-  print('  purge prefix                  Delete all keys');
-  print('  disconnect                    Disconnect from network');
-  print('  cls                           Clear the screen');
-  print('  echo [-n] [string]            Write to the standard output');
-  print('  exec file                     Spawn process');
-  print('  curl method url [value]       Send http request to url');
-  print('  wait [ms]                     Wait for specified milliseconds');
-  print('  history [clear]               Display terminal history');
-  print('  save file                     Save history to script file');
-  print('  load file                     Load and execute script file');
-  print('  exit [code]                   Exit the console with code');
-  print('  quit                          Quit the console');
+  phint('help', 'Output help information');
+  phint('version', 'Output version information');
+  phint('init', 'Initialize config file');
+  phint('config [name] [value]', 'Display or set config properties');
+  phint('output [name] [value]', 'Display or set output properties');
+  phint('device [-n] [name]', 'Display device properties');
+  phint('status [name]', 'Display status properties');
+  phint('dashboard [port]', 'Start CNS Dashboard service');
+  phint('connect', 'Connect to network');
+  phint('users', 'Display network users');
+  phint('roles', 'Display user roles');
+  phint('network', 'Configure network properties');
+  phint('install url', 'Configure profile from url');
+  phint('profiles [profile]', 'Configure profile properties');
+  phint('nodes [node]', 'Configure node properties');
+  phint('contexts [node] [context]', 'Configure context properties');
+  phint('provider [node] [context] [profile]', 'Configure provider properties');
+  phint('consumer [node] [context] [profile]', 'Configure consumer properties');
+  phint('map', 'Display network map');
+  phint('find [filter]', 'Find matching keys');
+  phint('pwd', 'Display current key path');
+  phint('cd [key]', 'Change current key path');
+  phint('ls [-l] [key]', 'List key values');
+  phint('get key', 'Get key value');
+  phint('put key value', 'Put key value');
+  phint('del key', 'Delete key entry');
+  phint('purge prefix', 'Delete matching key entries');
+  phint('disconnect', 'Disconnect from network');
+  phint('cls', 'Clear the screen');
+  phint('echo [-n] [string]', 'Write to standard output');
+  phint('ask [prompt] [default]', 'Read from standard input');
+  phint('exec file', 'Spawn process');
+  phint('curl url [method] [data]', 'Send http request to url');
+  phint('wait [period]', 'Wait for specified time period');
+  phint('history [-c]', 'Display terminal history');
+  phint('save file', 'Save history to script file');
+  phint('load file', 'Load and execute script file');
+  phint('exit [code]', 'Exit the console with code');
+  phint('quit', 'Quit the console');
 
   // Console mode?
   if (terminal !== undefined && pipe === undefined)
@@ -702,6 +852,10 @@ function version() {
 
 // Init environment
 async function init() {
+  // Must be console
+  if (pipe !== undefined)
+    throw new Error(E_AVAILABLE);
+
   // Output help
   print('This utility will walk you through creating a .env environment file.');
   print('It only covers the most common items, and tries to guess sensible defaults.\n');
@@ -712,22 +866,32 @@ async function init() {
   const answers = await questions([
     'CNS Host',
     'CNS Port',
-    'Username',
-    'Password'
+    'CNS Username',
+    'CNS Password'
   ], [
-    config.CNS_HOST,
-    config.CNS_PORT,
-    config.CNS_USERNAME,
-    config.CNS_PASSWORD
+    config.host,
+    config.port,
+    config.username,
+    config.password
   ]);
 
   if (answers === null) return;
 
   // Update new values
-  config.CNS_HOST = answers[0];
-  config.CNS_PORT = answers[1];
-  config.CNS_USERNAME = answers[2];
-  config.CNS_PASSWORD = answers[3];
+  config.host = answers[0];
+  config.port = answers[1];
+  config.username = answers[2];
+  config.password = answers[3];
+
+  // Prompt to write
+  print('\nAbout to write .env file:\n');
+
+  print('CNS_HOST = ' + answers[0]);
+  print('CNS_PORT = ' + answers[1]);
+  print('CNS_USERNAME = ' + answers[2]);
+  print('CNS_PASSWORD = ' + answers[3]);
+
+  if (!await confirmation()) return;
 
   // Store and re-connect
   await store();
@@ -754,337 +918,38 @@ function output(arg1, arg2) {
   const value = argument(arg2);
 
   property('output', options, name, value);
+
+  if (value === undefined) return;
+
+  if (name === 'prompt' && terminal !== undefined)
+    terminal.setPrompt(escape(options.prompt));
 }
 
-//
-async function network() {
-  if (client === undefined)
-    throw new Error(E_CONNECT);
+// Display device properties
+function device(arg1) {
+  const name = argument(arg1);
 
-  await setup('cns/network', 'your network properties', [
-      'Network Name',
-      'Orchestrator Scope',
-      'Access Token'
-    ], [
-      'My Network',
-      'contexts',
-      ''
-    ], [
-      'name',
-      'orchestrator',
-      'token'
-    ]);
-}
-
-//
-async function profiles(arg1, arg2) {
-  if (client === undefined)
-    throw new Error(E_CONNECT);
-
-  const profile = argument(arg1);
-
-  if (profile === undefined) {
-
-// properties profile         <-- command
-    // List profiles
-//    function properties(profile, version) {
-//      const props = {};
-//      const keys = filter(cache, 'cns/network/profiles/' + profile + '/versions/version' + version + '/properties/*/name');
-
-//      for (const key in keys) {
-//        const parts = key.split('/');
-//        const property = parts[7];
-
-//        props[property] = keys[key];
-//      }
-//      return props;
-//    }
-
-    const prefix = 'cns/network/profiles/*/name';
-    const keys = filter(cache, prefix);
-
-    const profiles = {};
-
-    for (const key in keys) {
-      const parts = key.split('/');
-
-      const profile = parts[3];
-//      const name = keys[key];
-
-      profiles[profile] = keys[key];//properties(profile, 1);
-    }
-
-    display('profiles', profiles);
+  // Display network interfaces?
+  if (name === '-n') {
+    const nets = os.networkInterfaces();
+    property('device', nets);
     return;
   }
-
-  // Pull profile from server?
-  if (profile === 'pull') {
-    await pull(required(arg2));
-    return;
-  }
-
-//  await setup('cns/network/profiles/' + profile, 'setting up a connection profile', [
-
-  // Output help
-  print('This utility will walk you through setting up a connection profile.');
-  print('It only covers the most common items, and tries to guess sensible defaults.\n');
-
-  print('Press ^C at any time to quit.\n');
-
-  const ns = 'cns/network/profiles/' + profile + '/';
-
-  // Ask questions
-  const answers = await questions([
-    'Profile Name',
-    'Profile Version'
-  ], [
-    cache[ns + 'name'] || 'My Profile',
-    ''
-  ]);
-
-  if (answers === null) return;
-
-  const version = Number(answers[1]) || 1;
-
-  // Prompt to write
-  print('\nAbout to publish ' + profile + ' v' + version + ' properties:\n');
-
-  print('name = ' + answers[0]);
-  print('version = ' + answers[1] + '\n');
-
-  if (!await question()) return;
-
-  // Update new values
-  await put(ns + 'name', answers[0]);
-//  await put(ns + 'versions/' + , answers[1]);
-//  await put(ns + 'comment', answers[2]);
+  property('device', system, name);
 }
 
-//
-async function nodes(arg1) {
-  if (client === undefined)
-    throw new Error(E_CONNECT);
-
-  const node = argument(arg1);
-
-  if (node === undefined) {
-    // List nodes
-    const prefix = 'cns/network/nodes/*/name';
-    const keys = filter(cache, prefix);
-
-    const nodes = {};
-
-    for (const key in keys) {
-      const parts = key.split('/');
-
-      const node = parts[3];
-      const name = keys[key];
-
-      nodes[node] = name;
-    }
-
-    display('nodes', nodes);
-    return;
-  }
-
-  await setup('cns/network/nodes/' + node, 'a network node', [
-      'Node Name',
-      'Upstream Network',
-      'Access Token'
-    ], [
-      'My Node',
-      '',
-      ''
-    ], [
-      'name',
-      'upstream',
-      'token'
-    ]);
-
-// switch namespace?
-}
-
-//
-async function contexts(arg1, arg2) {
-  if (client === undefined)
-    throw new Error(E_CONNECT);
-
-  const node = required(arg1);        // prompt for node?
-  const context = argument(arg2);
-
-// node exists?
-
-  if (context === undefined) {
-    // List contexts
-    const prefix = 'cns/network/nodes/' + node + '/contexts/*/name';
-    const keys = filter(cache, prefix);
-
-    const contexts = {};
-
-    for (const key in keys) {
-      const parts = key.split('/');
-
-      const context = parts[5];
-      const name = keys[key];
-
-      contexts[context] = name;
-    }
-
-    display(node, contexts);
-    return;
-  }
-
-  await setup('cns/network/nodes/' + node + '/contexts/' + context, 'a node context', [
-    'Context Name',
-    'Access Token'
-  ], [
-    'My Context',
-    ''
-  ], [
-    'name',
-    'token'
-  ]);
-}
-
-//
-async function provider(arg1, arg2, arg3, arg4, arg5) {
-  if (client === undefined)
-    throw new Error(E_CONNECT);
-
-  const node = required(arg1);
-  const context = required(arg2);
-  const profile = argument(arg3);
-
-  if (profile === undefined) {
-    const prefix = 'cns/network/nodes/' + node + '/contexts/' + context + '/provider/*/version';
-    const keys = filter(cache, prefix);
-
-    const providers = {};
-
-    for (const key in keys) {
-      const parts = key.split('/');
-      const profile = parts[7];
-
-      providers[profile] = 'Version ' + (Number(keys[key]) + 1);
-    }
-
-    display('provider', providers);
-    return;
-  }
-
-  const version = argument(arg4, 1);
-  const scope = argument(arg5);
-
-  const ps = 'cns/network/profiles/' + profile + '/versions/version' + version + '/properties';
-
-  const properties = filter(cache, ps + '/*/name');
-
-  const prompts = [];
-  const defaults = [];
-  const names = [];
-
-  for (const key in properties) {
-    const parts = key.split('/');
-    const property = parts[7];
-
-    const propagate = cache[ps + '/' + property + '/propagate'];
-    const provider = cache[ps + '/' + property + '/provider'];
-    const required = cache[ps + '/' + property + '/required'];
-
-    if (provider === 'yes') {
-      prompts.push(properties[key]);
-      defaults.push('');
-      names.push(property);
-    }
-  }
-
-  const cs = 'cns/network/nodes/' + node + '/contexts/' + context + '/provider/' + profile;
-  var ok = true;
-
-  if (prompts.length > 0) {
-    ok = await setup(cs + '/properties', 'a provider profile',
-      prompts,
-      defaults,
-      names);
-  }
-
-  if (ok) {
-    await put(cs + '/version', version);
-    if (scope !== undefined) await put(cs + '/scope', scope);
-  }
-}
-
-//
-async function consumer(arg1, arg2, arg3, arg4, arg5) {
-  if (client === undefined)
-    throw new Error(E_CONNECT);
-
-  const node = required(arg1);
-  const context = required(arg2);
-  const profile = argument(arg3);
-
-  if (profile === undefined) {
-
-
-    return;
-  }
-
-  const version = argument(arg4, 1);
-  const scope = argument(arg5);
-
-  const ps = 'cns/network/profiles/' + profile + '/versions/version' + version + '/properties';
-
-  const properties = filter(cache, ps + '/*/name');
-
-  const prompts = [];
-  const defaults = [];
-  const names = [];
-
-  for (const key in properties) {
-    const parts = key.split('/');
-    const property = parts[7];
-
-    const propagate = cache[ps + '/' + property + '/propagate'];
-    const provider = cache[ps + '/' + property + '/provider'];
-    const required = cache[ps + '/' + property + '/required'];
-
-    if (provider !== 'yes') {
-      prompts.push(properties[key]);
-      defaults.push('');
-      names.push(property);
-    }
-  }
-
-  const cs = 'cns/network/nodes/' + node + '/contexts/' + context + '/consumer/' + profile;
-  var ok = true;
-
-  if (prompts.length > 0) {
-    ok = await setup(cs + '/properties', 'a consumer profile',
-      prompts,
-      defaults,
-      names);
-  }
-
-  if (ok) {
-    await put(cs + '/version', version);
-    if (scope !== undefined) await put(cs + '/scope', scope);
-  }
-}
-
-//
-async function connections(arg1, arg2) {
-  if (client === undefined)
-    throw new Error(E_CONNECT);
-
-
-
-}
-
-// Display status
+// Display status properties
 function status(arg1) {
   const name = argument(arg1);
   property('status', stats, name);
+}
+
+// Start dashboard server
+function dashboard(arg1) {
+  const host = 'localhost';
+  const port = argument(arg1, '8080');
+
+  start(host, port);
 }
 
 // Connect client
@@ -1092,13 +957,13 @@ async function connect() {
   // Disconnect previous
   await disconnect();
 
-  const host = config.CNS_HOST;
-  const port = config.CNS_PORT;
+  const host = config.host;
+  const port = config.port;
 
   if (!host) throw new Error(E_CONFIG);
 
-  const username = config.CNS_USERNAME;
-  const password = config.CNS_PASSWORD;
+  const username = config.username;
+  const password = config.password;
 
   // Client options
   const options = {
@@ -1106,7 +971,7 @@ async function connect() {
   };
 
   // Using auth?
-  if (username !== '' && password !== '') {
+  if (username !== '') {
     options.auth = {
       username: username,
       password: password
@@ -1123,9 +988,6 @@ async function connect() {
     .strings()
     .catch((e) => {
       // Failure
-      stats.errors++;
-      broadcast();
-
       throw new Error(E_CONNECT + ': ' + e.message);
     });
 
@@ -1137,73 +999,732 @@ async function connect() {
     .create()
     .catch((e) => {
       // Failure
-      stats.errors++
-      broadcast();
-
       throw new Error(E_WATCH + ': ' + e.message);
     });
 
   watcher
     .on('connected', () => {
+      // Re-connect
       debug('Connected...');
     })
-    .on('put', (result) => {
-      const key = result.key.toString();
-      const value = result.value.toString();
+    .on('put', (change) => {
+      // Key put
+      const key = change.key.toString();
+      const value = change.value.toString();
 
-      debug('PUT ' + key + ' = ' + value);
-
+//      debug('PUT ' + key + ' = ' + value);
       cache[key] = value;
-      stats.updates++;
 
+      stats.updates++;
       broadcast();
     })
-    .on('delete', (result) => {
-      const key = result.key.toString();
-      const value = result.value.toString();
+    .on('delete', (change) => {
+      // Key deleted
+      const key = change.key.toString();
+      const value = change.value.toString();
 
-      debug('DEL ' + key);
-
+//      debug('DEL ' + key);
       delete cache[key];
-      stats.updates++;
 
+      stats.updates++;
       broadcast();
     })
     .on('disconnected', () => {
+      // Broken connection
       debug('Disconnected...');
+    })
+    .on('error', (e) => {
+      // Failure
+      throw new Error(E_WATCH + ': ' + e.message);
     });
 
   // Success
   debug('Network on ' + host + (username?(' as ' + username):''));
-  stats.connection = 'online';
+  cd();
 
-  namespace('cns/network');
+  stats.connection = 'online';
   broadcast();
 }
 
-// Set namespace
-function namespace(arg1) {
-  const loc = argument(arg1);
-
-  if (loc === undefined) {
-    display('namespace', ns);
-    return;
-  }
-
-  // Remove trailing slashes
-  ns = expand(loc);
-  ns = ns.replace(/\/+$/, '');
-
-  // Set console prompt
-  if (terminal !== undefined)
-    terminal.setPrompt(cwd());
-}
-
-//
-async function map() {
+// Display users
+async function users() {
+  // Must be connected
   if (client === undefined)
     throw new Error(E_CONNECT);
 
+  // Get users
+  const users = await client.getUsers()
+    .catch((e) => {
+      // Failure
+      throw new Error(E_USERS + ': ' + e.message);
+    });
+
+  // Success
+  const u = {};
+
+  for (const user of users) {
+    const name = user.name;
+    const roles = await user.roles();
+
+    const r = [];
+
+    for (const role of roles)
+      r.push(role.name);
+
+    u[name] = r.join(', ');
+  }
+  display('users', u);
+}
+
+// Display roles
+async function roles() {
+  // Must be connected
+  if (client === undefined)
+    throw new Error(E_CONNECT);
+
+  // Get roles
+  const roles = await client.getRoles()
+    .catch((e) => {
+      // Failure
+      throw new Error(E_ROLES + ': ' + e.message);
+    });
+
+  // Success
+  const r = {};
+
+  for (const role of roles) {
+    const name = role.name;
+    const perms = await role.permissions();
+
+    const p = [];
+
+    for (const perm of perms)
+      p.push(perm.permission);
+
+    r[name] = p.join(', ');
+  }
+  display('roles', r);
+}
+
+// Configure network
+async function network() {
+  // Must be connected
+  if (client === undefined)
+    throw new Error(E_CONNECT);
+
+  // Must be console
+  if (pipe !== undefined)
+    throw new Error(E_AVAILABLE);
+
+  // Output help
+  print('This utility will walk you through setting up network properties.');
+  print('It only covers the most common items, and tries to guess sensible defaults.\n');
+
+  print('Press ^C at any time to quit.\n');
+
+  // Ask questions
+  const ns = 'cns/network/';
+
+  const answers = await questions([
+      'Network Name',
+      'Network Orchestrator',
+      'Network Token'
+    ], [
+      cache[ns + 'name'] || 'My Network',
+      cache[ns + 'orchestrator'] || 'contexts',
+      cache[ns + 'token'] || ''
+    ]);
+
+  if (answers === null) return;
+
+  // Prompt to write
+  print('\nAbout to publish properties:\n');
+
+  print('name = ' + answers[0]);
+  print('orchestrator = ' + answers[1]);
+  print('token = ' + answers[2]);
+
+  if (!await confirmation()) return;
+
+  // Update new values
+  put(ns + 'name', answers[0]);
+  put(ns + 'orchestrator', answers[1]);
+  put(ns + 'token', answers[2]);
+
+  cd(ns);
+}
+
+// Install profile
+async function install(arg1) {
+  // Must be connected
+  if (client === undefined)
+    throw new Error(E_CONNECT);
+
+  const url = required(arg1);
+
+  // Send request
+  try {
+    const data = await request('GET', url);
+    const profile = JSON.parse(data);
+
+    const name = profile.name || '';
+    const title = profile.title || '';
+    const versions = profile.versions || [];
+
+    // Must have a name
+    if (typeof name !== 'string' || name === '')
+      throw new Error('Not a valid profile descriptor');
+
+    const ns = 'cns/network/profiles/' + name + '/';
+
+    // Purge existing
+    await purge(ns + 'versions');//, false);
+
+    // Update new values
+    for (var n = 0; n < versions.length; n++) {
+      const version = versions[n];
+      const properties = version.properties || [];
+
+      const v = n + 1;
+      const vs = ns + 'versions/version' + v + '/';
+
+      for (const property of properties) {
+        const ps = vs + 'properties/' + property.name + '/';
+
+        await put(ps + 'name', property.description || '');
+        await put(ps + 'provider', (property.server === null)?'yes':'no');
+        await put(ps + 'required', (property.required === null)?'yes':'no');
+        await put(ps + 'propagate', (property.propagate === null)?'yes':'no');
+      }
+      await put(vs + 'name', 'Version ' + v);
+    }
+    await put(ns + 'name', title);
+
+//    cd(ns);
+  } catch(e) {
+    // Failure
+    throw new Error(E_INSTALL + ': ' + e.message);
+  }
+}
+
+// Configure profiles
+async function profiles(arg1) {
+  // Must be connected
+  if (client === undefined)
+    throw new Error(E_CONNECT);
+
+  const profile = argument(arg1);
+
+  // List profiles?
+  if (profile === undefined) {
+    display('profiles', getDescriptors());
+    return;
+  }
+
+  // Must be console
+  if (pipe !== undefined)
+    throw new Error(E_AVAILABLE);
+
+  // Output help
+  print('This utility will walk you through setting up a profile descriptor.');
+  print('It only covers the most common items, and tries to guess sensible defaults.\n');
+
+  print('Press ^C at any time to quit.\n');
+
+  // Ask questions
+  const ns = 'cns/network/profiles/' + profile + '/';
+
+  const answers = await questions([
+      'Profile Name',
+      'Profile Version'
+    ], [
+      cache[ns + 'name'] || 'My Profile',
+      '1'
+    ]);
+
+  if (answers === null) return;
+
+  // Edit existing properties
+  const version = Number(answers[1]) || 1;
+
+  const vs = ns + 'versions/version' + version + '/';
+  const keys = filter(cache, vs + 'properties/*/name');
+
+  const properties = {};
+
+  if (Object.keys(keys).length > 0)
+    print('\nEdit Version ' + version + ' properties (leave empty to delete).');
+
+  for (const key in keys) {
+    const parts = key.split('/');
+    const property = parts[7];
+
+    const id = await input('\nProperty Identifier', property);
+
+    if (id === null) return;
+    if (id === '') continue;
+
+    const ps = vs + 'properties/' + property + '/';
+
+    const answers = await questions([
+        'Property Name',
+        'Property from Provider?',
+        'Property is Required?',
+        'Property can Propagate?'
+      ], [
+        cache[ps + 'name'] || 'My Property',
+        cache[ps + 'provider'] || 'yes',
+        cache[ps + 'required'] || 'no',
+        cache[ps + 'propagate'] || 'yes'
+      ]);
+
+    if (answers === null) return;
+
+    properties[id] = {
+      name: answers[0],
+      provider: answers[1],
+      required: answers[2],
+      propagate: answers[3]
+    };
+  }
+
+  print('\nAdd Version ' + version + ' properties (leave empty to stop).');
+
+  // Add properties
+  while (true) {
+    const id = await input('\nProperty Identifier');
+
+    if (id === null) return;
+    if (id === '') break;
+
+    const answers = await questions([
+        'Property Name',
+        'Property from Provider?',
+        'Property is Required?',
+        'Property can Propagate?'
+      ], [
+        'My Property',
+        'yes',
+        'no',
+        'yes'
+      ]);
+
+    if (answers === null) return;
+
+    properties[id] = {
+      name: answers[0],
+      provider: answers[1],
+      required: answers[2],
+      propagate: answers[3]
+    };
+  }
+
+  // Prompt to write
+  print('\nAbout to publish properties:\n');
+
+  print('name = ' + answers[0]);
+  print('version = ' + version);
+
+  for (const id in properties)
+    print(id + ' = ' + properties[id].name);
+
+  if (!await confirmation()) return;
+
+  // Purge previous
+  await purge(vs + 'properties');//, false);
+
+  // Update new values
+  await put(ns + 'name', answers[0]);
+  await put(vs + 'name', 'Version ' + version);
+
+  for (const id in properties) {
+    const property = properties[id];
+
+    const ps = vs + 'properties/' + id + '/';
+
+    await put(ps + 'name', property.name);
+    await put(ps + 'provider', property.provider);
+    await put(ps + 'required', property.required);
+    await put(ps + 'propagate', property.propagate);
+  }
+
+  cd(ns);
+}
+
+// Configure node
+async function nodes(arg1) {
+  // Must be connected
+  if (client === undefined)
+    throw new Error(E_CONNECT);
+
+  const node = argument(arg1);
+
+  // List nodes?
+  if (node === undefined) {
+    display('nodes', getNodes());
+    return;
+  }
+
+  // Must be console
+  if (pipe !== undefined)
+    throw new Error(E_AVAILABLE);
+
+  // Output help
+  print('This utility will walk you through setting up a network node.');
+  print('It only covers the most common items, and tries to guess sensible defaults.\n');
+
+  print('Press ^C at any time to quit.\n');
+
+  // Ask questions
+  const ns = 'cns/network/nodes/' + node + '/';
+
+  const answers = await questions([
+      'Node Name',
+      'Node Upstream',
+      'Node Token'
+    ], [
+      cache[ns + 'name'] || 'My Node',
+      cache[ns + 'upstream'] || '',
+      cache[ns + 'token'] || ''
+    ]);
+
+  if (answers === null) return;
+
+  // Prompt to write
+  print('\nAbout to publish properties:\n');
+
+  print('name = ' + answers[0]);
+  print('upstream = ' + answers[1]);
+  print('token = ' + answers[2]);
+
+  if (!await confirmation()) return;
+
+  // Update new values
+  await put(ns + 'name', answers[0]);
+  await put(ns + 'upstream', answers[1]);
+  await put(ns + 'token', answers[2]);
+
+  cd(ns);
+}
+
+// Configure context
+async function contexts(arg1, arg2) {
+  // Must be connected
+  if (client === undefined)
+    throw new Error(E_CONNECT);
+
+  const node = argument(arg1);
+  const context = argument(arg2);
+
+  // List all contexts?
+  if (node === undefined) {
+    const nodes = getNodes();
+
+    for (const node in nodes)
+      nodes[node] = getContexts(node);
+
+    display('nodes', nodes);
+    return;
+  }
+
+  // Node must exist
+  if (cache['cns/network/nodes/' + node + '/name'] === undefined)
+    throw new Error(E_FOUND + ': ' + node);
+
+  // List contexts?
+  if (context === undefined) {
+    display('contexts', getContexts(node));
+    return;
+  }
+
+  // Must be console
+  if (pipe !== undefined)
+    throw new Error(E_AVAILABLE);
+
+  // Output help
+  print('This utility will walk you through setting up a node context.');
+  print('It only covers the most common items, and tries to guess sensible defaults.\n');
+
+  print('Press ^C at any time to quit.\n');
+
+  // Ask questions
+  const ns = 'cns/network/nodes/' + node + '/contexts/' + context + '/';
+
+  const answers = await questions([
+      'Context Name',
+      'Context Token'
+    ], [
+      cache[ns + 'name'] || 'My Context',
+      cache[ns + 'token'] || ''
+    ]);
+
+  if (answers === null) return;
+
+  // Prompt to write
+  print('\nAbout to publish properties:\n');
+
+  print('name = ' + answers[0]);
+  print('token = ' + answers[1]);
+
+  if (!await confirmation()) return;
+
+  // Update new values
+  await put(ns + 'name', answers[0]);
+  await put(ns + 'token', answers[1]);
+
+  cd(ns);
+}
+
+// Configure provider
+async function provider(arg1, arg2, arg3, arg4, arg5) {
+  // Must be connected
+  if (client === undefined)
+    throw new Error(E_CONNECT);
+
+  const node = argument(arg1);
+  const context = argument(arg2);
+  const profile = argument(arg3);
+  const version = argument(arg4, 1);
+  const scope = argument(arg5, 'none');
+
+  // List all providers?
+  if (node === undefined) {
+    const nodes = getNodes();
+
+    for (const node in nodes) {
+      const contexts = getContexts(node);
+
+      for (const context in contexts)
+        contexts[context] = getProfiles(node, context, 'provider');
+
+      nodes[node] = contexts;
+    }
+    display('nodes', nodes);
+    return;
+  }
+
+  // Node must exist
+  if (cache['cns/network/nodes/' + node + '/name'] === undefined)
+    throw new Error(E_FOUND + ': ' + node);
+
+  // List all providers?
+  if (context === undefined) {
+    const contexts = getContexts(node);
+
+    for (const context in contexts)
+      contexts[context] = getProfiles(node, context, 'provider');
+
+    display('contexts', contexts);
+    return;
+  }
+
+  // Context must exist
+  if (cache['cns/network/nodes/' + node + '/contexts/' + context + '/name'] === undefined)
+    throw new Error(E_FOUND + ': ' + context);
+
+  // List providers?
+  if (profile === undefined) {
+    display('provider', getProfiles(node, context, 'provider'));
+    return;
+  }
+
+  // Profile must exist
+  if (cache['cns/network/profiles/' + profile + '/name'] === undefined)
+    throw new Error(E_FOUND + ': ' + profile);
+
+  // Must be console
+  if (pipe !== undefined)
+    throw new Error(E_AVAILABLE);
+
+  // Output help
+  print('This utility will walk you through setting up a provider capability.');
+  print('It only covers the most common items, and tries to guess sensible defaults.\n');
+
+  print('Press ^C at any time to quit.\n');
+
+  // Ask questions
+  const ns = 'cns/network/nodes/' + node + '/contexts/' + context + '/provider/' + profile + '/';
+  const ps = 'cns/network/profiles/' + profile + '/versions/version' + version + '/properties/';
+
+  const prompts = [];
+  const defaults = [];
+  const names = [];
+
+  const keys = filter(cache, ps + '*/name');
+
+  for (const key in keys) {
+    const parts = key.split('/');
+    const property = parts[7];
+
+    const provider = cache[ps + property + '/provider'];
+    const required = cache[ps + property + '/required'];
+    const propagate = cache[ps + property + '/propagate'];
+
+    // Provider property?
+    if (provider === 'yes') {
+      prompts.push('(' + property + ') ' + keys[key]);
+      defaults.push(cache[ns + 'properties/' + property] || '');
+      names.push(property);
+    }
+  }
+
+  const answers = await questions(
+    prompts,
+    defaults);
+
+  if (answers === null) return;
+
+  // Prompt to write
+  print('\nAbout to publish properties:\n');
+
+  print('version = ' + version);
+  print('scope = ' + scope);
+
+  for (var n = 0; n < names.length; n++)
+    print(names[n] + ' = ' + answers[n]);
+
+  if (!await confirmation()) return;
+
+  // Update new values
+  await put(ns + 'version', version);
+  await put(ns + 'scope', scope);
+
+  for (var n = 0; n < names.length; n++)
+    await put(ns + 'properties/' + names[n], answers[n]);
+
+  cd(ns);
+}
+
+// Configure consumer
+async function consumer(arg1, arg2, arg3, arg4, arg5) {
+  // Must be connected
+  if (client === undefined)
+    throw new Error(E_CONNECT);
+
+  const node = argument(arg1);
+  const context = argument(arg2);
+  const profile = argument(arg3);
+  const version = argument(arg4, 1);
+  const scope = argument(arg5, 'none');
+
+  // List all consumers?
+  if (node === undefined) {
+    const nodes = getNodes();
+
+    for (const node in nodes) {
+      const contexts = getContexts(node);
+
+      for (const context in contexts)
+        contexts[context] = getProfiles(node, context, 'consumer');
+
+      nodes[node] = contexts;
+    }
+    display('nodes', nodes);
+    return;
+  }
+
+  // Node must exist
+  if (cache['cns/network/nodes/' + node + '/name'] === undefined)
+    throw new Error(E_FOUND + ': ' + node);
+
+  // List all consumers?
+  if (context === undefined) {
+    const contexts = getContexts(node);
+
+    for (const context in contexts)
+      contexts[context] = getProfiles(node, context, 'consumer');
+
+    display('contexts', contexts);
+    return;
+  }
+
+  // Context must exist
+  if (cache['cns/network/nodes/' + node + '/contexts/' + context + '/name'] === undefined)
+    throw new Error(E_FOUND + ': ' + context);
+
+  // List consumers?
+  if (profile === undefined) {
+    display('consumer', getProfiles(node, context, 'consumer'));
+    return;
+  }
+
+  // Profile must exist
+  if (cache['cns/network/profiles/' + profile + '/name'] === undefined)
+    throw new Error(E_FOUND + ': ' + profile);
+
+  // Must be console
+  if (pipe !== undefined)
+    throw new Error(E_AVAILABLE);
+
+  // Output help
+  print('This utility will walk you through setting up a consumer capability.');
+  print('It only covers the most common items, and tries to guess sensible defaults.\n');
+
+  print('Press ^C at any time to quit.\n');
+
+  // Ask questions
+  const ns = 'cns/network/nodes/' + node + '/contexts/' + context + '/consumer/' + profile + '/';
+  const ps = 'cns/network/profiles/' + profile + '/versions/version' + version + '/properties/';
+
+  const prompts = [];
+  const defaults = [];
+  const names = [];
+
+  const keys = filter(cache, ps + '*/name');
+
+  for (const key in keys) {
+    const parts = key.split('/');
+    const property = parts[7];
+
+    const provider = cache[ps + property + '/provider'];
+    const required = cache[ps + property + '/required'];
+    const propagate = cache[ps + property + '/propagate'];
+
+    // Consumer property?
+    if (provider !== 'yes') {
+      prompts.push('(' + property + ') ' + keys[key]);
+      defaults.push(cache[ns + 'properties/' + property] || '');
+      names.push(property);
+    }
+  }
+
+  const answers = await questions(
+    prompts,
+    defaults);
+
+  if (answers === null) return;
+
+  // Prompt to write
+  print('\nAbout to publish properties:\n');
+
+  print('version = ' + version);
+  print('scope = ' + scope);
+
+  for (var n = 0; n < names.length; n++)
+    print(names[n] + ' = ' + answers[n]);
+
+  if (!await confirmation()) return;
+
+  // Update new values
+  await put(ns + 'version', version);
+  await put(ns + 'scope', scope);
+
+  for (var n = 0; n < names.length; n++)
+    await put(ns + 'properties/' + names[n], answers[n]);
+
+  cd(ns);
+}
+
+// Map network
+async function map(arg1, arg2) {
+  // Must be connected
+  if (client === undefined)
+    throw new Error(E_CONNECT);
+
+  const node = argument(arg1);
+  const context = argument(arg2);
+
+  // Map properties
   function properties(node, context, role, profile, connection) {
     const props = {};
     const keys = filter(cache, 'cns/network/nodes/' + node + '/contexts/' + context + '/' + role + '/' + profile + '/connections/' + connection + '/properties/*');
@@ -1217,6 +1738,7 @@ async function map() {
     return props;
   }
 
+  // Map connections
   function connections(node, context, role, profile) {
     const anti = (role === 'provider')?'consumer':'provider';
 
@@ -1232,19 +1754,34 @@ async function map() {
     return conns;
   }
 
-  function capabilities(node, context, role) {
-    const caps = {};
+  // Map profiles
+  function profiles(node, context, role) {
+    const profiles = {};
     const keys = filter(cache, 'cns/network/nodes/' + node + '/contexts/' + context + '/' + role + '/*/version');
 
     for (const key in keys) {
       const parts = key.split('/');
       const profile = parts[7];
 
-      caps[profile] = connections(node, context, role, profile);
+      profiles[profile] = connections(node, context, role, profile);
     }
-    return caps;
+    return profiles;
   }
 
+  // Map capabilities
+  function capabilities(node, context) {
+    const capabilities = {};
+
+    const provider = profiles(node, context, 'provider');
+    const consumer = profiles(node, context, 'consumer');
+
+    if (Object.keys(provider).length > 0) capabilities.provider = provider;
+    if (Object.keys(consumer).length > 0) capabilities.consumer = consumer;
+
+    return capabilities;
+  }
+
+  // Map contexts
   function contexts(node) {
     const contexts = {};
     const keys = filter(cache, 'cns/network/nodes/' + node + '/contexts/*/name');
@@ -1253,60 +1790,100 @@ async function map() {
       const parts = key.split('/');
       const context = parts[5];
 
-      const provider = capabilities(node, context, 'provider');
-      const consumer = capabilities(node, context, 'consumer');
-
-      const obj = {};
-
-      if (Object.keys(provider).length > 0) obj.provider = provider;
-      if (Object.keys(consumer).length > 0) obj.consumer = consumer;
-
-      contexts[context] = obj;
+      contexts[context] = capabilities(node, context);
     }
     return contexts;
   }
 
-  const nodes = {};
-  const keys = filter(cache, 'cns/network/nodes/*/name');
+  // Map nodes
+  function nodes() {
+    const nodes = {};
+    const keys = filter(cache, 'cns/network/nodes/*/name');
 
-  for (const key in keys) {
-    const parts = key.split('/');
-    const node = parts[3];
+    for (const key in keys) {
+      const parts = key.split('/');
+      const node = parts[3];
 
-    nodes[node] = contexts(node);
+      nodes[node] = contexts(node);
+    }
+    return nodes;
   }
 
-  display('network', nodes);
+  // Map network?
+  if (node === undefined) {
+    display('network', nodes());
+    return;
+  }
+
+  // Map node?
+  if (context === undefined) {
+    display(node, contexts(node));
+    return;
+  }
+
+  // Map context
+  display(context, capabilities(node, context));
 }
 
+// Find matching keys
+function find(arg1) {
+  const filter = '*' + required(arg1) + '*';
+  const keys = {};
+
+  for (const key in cache) {
+    if (match(key, filter) || match(cache[key], filter))
+      keys[key] = cache[key];
+  }
+  display('keys', keys);
+}
+
+// Display path
+function pwd() {
+  display('path', namespace);
+}
+
+// Set path
+function cd(arg1) {
+  const loc = argument(arg1, (client === undefined)?'/':'~');
+  const ns = location(loc);
+
+  // Must be connected
+  if (client === undefined && ns !== '')
+    throw new Error(E_CONNECT);
+
+  namespace = ns;
+
+  if (terminal !== undefined)
+    terminal.setPrompt(escape(options.prompt));
+}
 
 // List keys
-async function list(arg1) {
-  const prefix = location(arg1);
-
+async function ls(arg1, arg2) {
+  // Must be connected
   if (client === undefined)
     throw new Error(E_CONNECT);
 
-/*
-  const keys = await client.getAll()
-    .prefix(prefix)
-    .strings()
-    .catch((e) => {
-      // Failure
-      stats.errors++;
-      broadcast();
+  const loc = argument(arg1, '');
 
-      throw new Error(E_LIST + ': ' + e.message);
-    });
+  // Long form list?
+  if (loc === '-l') {
+    const loc = argument(arg2, '*');
+    const prefix = wildcard(loc);
 
-  // Success
-  display(prefix, keys);
+    const keys = {};
 
-  stats.reads++;
-  broadcast();
-*/
+    for (const key in cache) {
+      if (match(key, prefix))
+        keys[key.replace(namespace + '/', '')] = cache[key];
+    }
+    display(namespace, keys);
+    return;
+  }
 
-  var from = [];
+  // Short form list
+  const prefix = wildcard(loc);
+
+  var root = [];
   var wild = false;
 
   const parts = prefix.split('/');
@@ -1316,17 +1893,21 @@ async function list(arg1) {
       wild = true;
       break;
     }
-    from.push(part);
+    root.push(part);
   }
-  from = from.join('/');
 
-  var match = prefix;
+  const blank = (arg1 === undefined);
+  const missing = (!wild && cache[prefix] === undefined);
 
-  if (arg1 === undefined || (!wild && cache[match] === undefined))
-    match += '/*';
+  if (!blank && !missing) root.pop();
 
-  const reduce = [];
-  const keys = filter(cache, match);
+  // Filter keys
+  const matches = prefix + ((blank || missing)?'/*':'');
+  const keys = filter(cache, matches);
+
+  // Reduce key names
+  const from = root.join('/');
+  const reduce = {};
 
   for (const key in keys) {
     const name = key.replace(from + '/', '');
@@ -1337,18 +1918,17 @@ async function list(arg1) {
 
 // Get key value
 async function get(arg1) {
-  const key = required(arg1);
-
+  // Must be connected
   if (client === undefined)
     throw new Error(E_CONNECT);
+
+  const loc = required(arg1);
+  const key = location(loc);
 
   const value = await client.get(key)
     .string()
     .catch((e) => {
       // Failure
-      stats.errors++;
-      broadcast();
-
       throw new Error(E_GET + ': ' + e.message);
     });
 
@@ -1361,19 +1941,19 @@ async function get(arg1) {
 
 // Put key value
 async function put(arg1, arg2) {
-  const key = required(arg1);
-  const value = required(arg2);
-
+  // Must be connected
   if (client === undefined)
     throw new Error(E_CONNECT);
+
+  const loc = required(arg1);
+  const value = required(arg2);
+
+  const key = location(loc);
 
   await client.put(key)
     .value(value)
     .catch((e) => {
       // Failure
-      stats.errors++;
-      broadcast();
-
       throw new Error(E_PUT + ': ' + e.message);
     });
 
@@ -1384,18 +1964,17 @@ async function put(arg1, arg2) {
 
 // Delete key
 async function del(arg1) {
-  const key = required(arg1);
-
+  // Must be connected
   if (client === undefined)
     throw new Error(E_CONNECT);
+
+  const loc = required(arg1);
+  const key = location(loc);
 
   await client.delete()
     .key(key)
     .catch((e) => {
       // Failure
-      stats.errors++;
-      broadcast();
-
       throw new Error(E_DEL + ': ' + e.message);
     });
 
@@ -1405,19 +1984,30 @@ async function del(arg1) {
 }
 
 // Purge keys
-async function purge(arg1) {
-  const prefix = required(arg1);
-
+async function purge(arg1) {//, arg2) {
+  // Must be connected
   if (client === undefined)
     throw new Error(E_CONNECT);
+
+  const loc = required(arg1);
+  const prefix = location(loc);
+
+/*
+  if (arg2 !== false) {
+    // Must be console
+    if (pipe !== undefined)
+      throw new Error(E_AVAILABLE);
+
+    // Ask to confirm
+    if (!await confirmation('About to purge ' + prefix + '. '))
+      throw new Error(E_ABORT);
+  }
+*/
 
   await client.delete()
     .prefix(prefix)
     .catch((e) => {
       // Failure
-      stats.errors++;
-      broadcast();
-
       throw new Error(E_PURGE + ': ' + e.message);
     });
 
@@ -1428,15 +2018,15 @@ async function purge(arg1) {
 
 // Disconnect client
 async function disconnect() {
-  // Reset cache
-  cache = {};
-
   // Reset stats
   stats.reads = 0;
   stats.writes = 0;
   stats.updates = 0;
   stats.errors = 0;
   stats.connection = 'offline';
+
+  // Reset cache
+  cache = {};
 
   // Close watcher?
   if (watcher !== undefined) {
@@ -1454,73 +2044,8 @@ async function disconnect() {
     client = undefined;
   }
 
-  namespace('');
+  cd();
   broadcast();
-}
-
-// Start dashboard
-function dashboard(arg1) {
-  const host = 'localhost';
-  const port = argument(arg1, '8080');
-
-  // Cease previous
-  cease();
-
-  // I promise to
-  return new Promise((resolve, reject) => {
-    // Initialize express
-    const app = new express();
-
-    app.use(compression());
-    app.use(express.static(path.join(__dirname, '/public')));
-
-    debug('Creating webserver...');
-
-    // Create server
-    server = http.createServer(app)
-    // Started
-    .on('listening', () => {
-      // Create web socket
-      debug('Creating websocket...');
-      wss = expressws(app, server).getWss();
-
-      // Web socket request
-      app.ws('/', (ws, req) => {
-        // Receive
-        ws.on('message', async (packet) => {
-          debug('Websocket request: ' + packet);
-          await receive(ws, packet);
-        })
-        // Close
-        .on('close', () => {
-          debug('Websocket disconnect...');
-        })
-        // Failure
-        .on('error', (e) => {
-          debug('Websocket error: ' + e.message);
-        });
-
-        // Initial changes
-        debug('Websocket connect...');
-        broadcast(ws);
-      });
-
-      // All other requests
-      app.use((req, res) => {
-        res.status(404).send('<h1>Page not found</h1>');
-      });
-
-      print('CNS Dashboard running on http://' + host + ':' + port);
-      if (terminal !== undefined) resolve();
-    })
-    // Failure
-    .on('error', (e) => {
-      reject(e);
-    });
-
-    // Start listening
-    server.listen(port);
-  });
 }
 
 // Clear screen
@@ -1550,20 +2075,42 @@ function echo() {
     process.stdout.write(text.green);
 }
 
+// Read from console
+async function ask(arg1, arg2) {
+  // Must be console
+  if (pipe !== undefined)
+    throw new Error(E_AVAILABLE);
+
+  const prompt = argument(arg1, '');
+  const def = argument(arg2);
+
+  reply = await input(prompt, def);
+
+  // Terminate script?
+//  if (prompt.endsWith('?') && answer === 'no')
+//    throw new Error(E_ABORT);
+}
+
 // Spawn process
-async function exec(arg1) {
-  const path = required(arg1);
+async function exec() {
+  const args = Array.prototype.slice.call(arguments);
+  const path = argument(args.join(' '));
+
+  // No value?
+  if (path === '')
+    throw new Error(E_MISSING);
+
   await spawn(path);
 }
 
 // Issue http request
 async function curl(arg1, arg2, arg3) {
-  const method = required(arg1).toUpperCase();
-  const url = required(arg2);
+  const url = required(arg1);
+  const method = argument(arg2, 'GET');
   const data = argument(arg3);
 
   // Send request
-  var result = await getRequest(method, url, data);
+  var result = await request(method, url, data);
   if (!result.endsWith('\n')) result += '\n';
 
   if (!transmit(result))
@@ -1572,7 +2119,7 @@ async function curl(arg1, arg2, arg3) {
 
 // Wait some time
 async function wait(arg1) {
-  const ms = argument(arg1);
+  const ms = period(arg1);
   await sleep(ms);
 }
 
@@ -1580,11 +2127,11 @@ async function wait(arg1) {
 function history(arg1) {
   const arg = argument(arg1);
 
-  // Ignore last command
+  // Ignore this command
   terminal.history.shift();
 
   switch (arg) {
-    case 'clear':
+    case '-c':
       // Clear history
       terminal.history = [];
       return;
@@ -1599,9 +2146,9 @@ function history(arg1) {
 
 // Save script file
 function save(arg1) {
-  const file = extension(argument(arg1), '.cns');
+  const file = extension(required(arg1), '.cns');
 
-  // Ignore last command
+  // Ignore this command
   terminal.history.shift();
 
   // Write file
@@ -1614,7 +2161,7 @@ function save(arg1) {
 
 // Load script file
 async function load(arg1) {
-  const file = extension(argument(arg1), '.cns');
+  const file = extension(required(arg1), '.cns');
 
   // Read file
   const data = read(file);
@@ -1645,80 +2192,45 @@ async function exit(arg1) {
   if (client !== undefined)
     await disconnect();
 
-  cease();
+  stop();
   close();
 
   process.exit(code);
 }
 
+// Get indent
+function indent(char) {
+  const size = Math.min(Math.max(options.indent, 0), 8);
+  return (char === undefined)?size:char.repeat(size);
+}
 
+// Get column count
+function columns() {
+  return options.columns || process.stdout.columns || 80;
+}
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+// Get row count
+function rows() {
+  return options.rows || process.stdout.rows || 25;
+}
 
 // Format output
 function display(root, value) {
-//  const parts = path.split('/');
-
-  // Pipe to socket
-/*
-  if (pipe !== undefined) {
-    const data = JSON.stringify({
-      response: value
-    });
-
-    debug('Websocket response: ' + data);
-    pipe.send(data);
-
-    return;
-  }
-*/
-
-//  if (pipe !== undefined) fmt = 'json';
-
-
   // Format and display
-//  const root = block;//parts.pop();
   const text = format(root, value).trimEnd();
-
-/*
-  if (pipe !== undefined) {
-    debug('Websocket response: ' + text);
-
-    const data = JSON.stringify({
-      response: text
-    });
-
-    pipe.send(data);
-  } else {*/
   if (text !== '') print(text);
-//  }
 }
 
 // Format output value
 function format(root, value) {
-  if (typeof value === 'object' &&
-    Object.keys(value).length === 0)
+  if (value === undefined || value === null ||
+    (typeof value === 'object' && Object.keys(value).length === 0))
     return '';
 
   // What output format?
   switch (options.format) {
     case 'text':
-      return text(value, '');
+      return text(root, value, '');
     case 'tree':
       return tree(root, value);
     case 'table':
@@ -1726,25 +2238,24 @@ function format(root, value) {
     case 'json':
       return json(root, value);
     case 'xml':
-      return xml(root, value);
+      return '<?xml version="1.0" encoding="UTF-8"?>\n' + xml(root, value, '');
   }
+  return '';
 }
 
 // Format as text
-function text(value, level) {
+function text(root, value, level) {
   if (typeof value === 'object') {
-    var t = '';
+    var t = level + root + ':\n';
 
-    for (const name in value) {
-      const v = value[name];
+    level += indent(' ');
 
-      if (typeof v === 'object')
-        t += level + name + ':\n' + text(v, level + indent(' '));
-      else t += level + name + '=' + sanitize(v) + '\n';
-    }
+    for (const name in value)
+      t += text(name, value[name], level);
+
     return t;
   }
-  return sanitize(value);
+  return level + root + ' = ' + value.toString() + '\n';
 }
 
 // Format as tree
@@ -1758,7 +2269,7 @@ function tree(root, value) {
 
     return t.join('\n');
   }
-  return value.toString();//justify(root, value.toString());
+  return value.toString();
 }
 
 // Format as table
@@ -1770,37 +2281,13 @@ function table(root, value) {
       var v = value[name];
 
       if (typeof v === 'object')
-        v = Object.keys(v).join(', ');  // '\n');
+        v = table(name, v).trimEnd();
 
       t.push([name, v]);
     }
+  } else t.push([root, value.toString()]);
 
-    if (t.length === 0) return '';
-  }
-  else t.push([root, value]);
-
-  var col1 = 0;
-  var col2 = 0;
-
-  for (const row of t) {
-    col1 = Math.max(col1, row[0].toString().length);
-    col2 = Math.max(col2, row[1].toString().length);
-  }
-
-  col2 = Math.min(col2, columns() - (col1 + 7));
-  if (col1 < 1 || col2 < 1) return '';
-
-  try {
-    return tables.table(t, {
-      columns: [
-        {width: col1},
-        {width: col2, wrapWord: true}
-      ]
-    });
-  } catch(e) {
-    // Failure
-    return '';
-  }
+  return (t.length === 0)?'':tables.table(t);
 }
 
 // Forat as json
@@ -1808,24 +2295,25 @@ function json(root, value) {
   const data = {};
   data[root] = value;
 
-  const indent = Math.min(Math.max(options.indent, 0), 8);
-  return JSON.stringify(data, null, indent);
+  return JSON.stringify(data, null, indent());
 }
 
 // Format as xml
-function xml(root, value) {
-/*  const data = {};
-  data[root] = value;
+function xml(root, value, level) {
+  const nl = (indent() > 0)?'\n':'';
 
-  const opt = {
-    header: true
-  };
+  if (typeof value === 'object') {
+    var t = level + '<group name="' + root + '">' + nl;
+    var c = level + '</group>' + nl;
 
-  if (options.indent > 0)
-    opt.indent = indent(' ');
+    level += indent(' ');
 
-  return jstoxml.toXML(data, opt);*/
-  return '<group name="nodes"><item name="version" value="0.1.0"/></group>';
+    for (const name in value)
+      t += xml(name, value[name], level);
+
+    return t + c;
+  }
+  return level + '<item name="' + root + '" value="' + value.toString() + '"/>' + nl;
 }
 
 // Generate tree data
@@ -1842,7 +2330,7 @@ function generateTree(obj) {
 
     if (typeof value === 'object')
       item.children = generateTree(value);
-    else item.value = sanitize(value);
+    else item.value = value.toString();
 
     t.push(item);
   }
@@ -1902,95 +2390,47 @@ function renderTree(data, render) {
 
 // Justify name value pair
 function justify(name, value) {
-  name += '    ';
+  name += '  ';
 
   const cols = columns();
   const span = cols - name.length - value.length;
 
-  if (span > 0) {
-    if (value === '') return name;
-    return name + ' '.repeat(span) + value;
-  }
-  return (name + value).substr(0, cols - 1) + '…';
+  return (span > 0)?
+    ((value === '')?name:(name + ' '.repeat(span) + value)):
+    ((name + value).substr(0, cols - 1) + '…');
 }
 
-/*
-// Output
-function directory(data) {
-  // Something to list?
-  if (typeof data !== 'object') return;
+// Format bytes
+function bytes(value) {
+  const range = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
 
-  // Get column width
-  var max = 0;
+  const k = 1024;
+  const p = (value === 0)?0:(Math.floor(Math.log(value) / Math.log(k)));
 
-  for (const name in data)
-    max = Math.max(max, name.length);
-
-  max += 4;
-
-  const width = Math.max((columns() / max) | 0, 0);
-  if (width === 0) return;
-
-  // Output each name
-  var s = '';
-  var w = 0;
-
-  for (const name in data) {
-    // Next row?
-    if (w++ >= width) {
-      s += '\n';
-      w = 0;
-    }
-
-    // Add column
-    s += name.padEnd(max);
-  }
-
-  print(s);
+  return Number((value / Math.pow(k, p)).toFixed(2)) + ' ' + range[p];
 }
-*/
 
+// Print help hint
+function phint(hint, text) {
+  print('  ' + hint + ' '.repeat(38 - hint.length) + text);
+}
 
+// Ask for confirmation
+async function confirmation(prompt) {
+  if (prompt === undefined) prompt = '\n';
 
+  const answer = await input(prompt + 'Is this OK?');
+  if (answer === null) return false;
 
-//
-async function setup(ns, prompt, prompts, defs, keys) {
-  // Output help
-  print('This utility will walk you through setting up ' + prompt + '.');
-  print('It only covers the most common items, and tries to guess sensible defaults.\n');
-
-  print('Press ^C at any time to quit.\n');
-
-  //
-  for (var n = 0; n < keys.length; n++) {
-    const key = keys[n];
-    const value = cache[ns + '/' + key];
-
-    if (value !== undefined) defs[n] = value;
+  if (answer === 'no') {
+    print('Aborted.');
+    return false;
   }
-
-  // Ask questions
-  const answers = await questions(prompts, defs);
-  if (answers === null) return false;
-
-  // Prompt to write
-  print('\nAbout to publish properties:\n');
-
-  for (var n = 0; n < keys.length; n++)
-    print(keys[n] + ' = ' + answers[n]);
-
-  print('');
-
-  if (!await question()) return false;
-
-  // Update new values
-  await publish(ns, keys, answers);
   return true;
 }
 
 // Ask multiple questions
 async function questions(prompts, defs) {
-  // Get answers
   const answers = [];
 
   for (var n = 0; n < prompts.length; n++) {
@@ -2002,32 +2442,12 @@ async function questions(prompts, defs) {
   return answers;
 }
 
-// Ask question
-async function question(prompt) {
-  // Async question
-  if (prompt === undefined) prompt = '';
-  else prompt += '. ';
-
-  const answer = await input(prompt + 'Is this OK? (yes/no)');
-
-  // Decode response
-  if (answer !== null) {
-    switch (answer.toLowerCase()) {
-      case 'y':
-      case 'yes':
-        return true;
-    }
-    print('Aborted.');
-  }
-  return false;
-}
-
 // Ask for input
 async function input(prompt, def) {
   // I promise to
   return new Promise((resolve, reject) => {
     // Suspend console
-    var history = suspend();
+    const history = suspend();
 
     // Create readline
     const rl = readline.createInterface({
@@ -2057,81 +2477,271 @@ async function input(prompt, def) {
       };
     }
 
-    if (def) prompt += ' (' + def + ')';
-    prompt += ': ';
+    // Is a question?
+    const yn = prompt.endsWith('?');
 
+    if (prompt !== '') {
+      if (yn) prompt += ' (yes/no)';
+      prompt += ': ';
+    }
+
+    // Get input
     rl.question(prompt, (answer) => {
+      // Resume console
       resume(rl, history);
-      resolve(answer.trim() || def || '');
+
+      // Decode answer
+      answer = answer.trim();
+
+      if (yn) {
+        switch (answer.toLowerCase()) {
+          case 'y':
+          case 'yes':
+            answer = 'yes';
+            break;
+          default:
+            answer = 'no';
+            break;
+        }
+      }
+      resolve(answer);
     });
+
+    // Start with default?
+    if (def) rl.write(def);
   });
 }
 
-//
-async function publish(ns, keys, values) {
-  for (var n = 0; n < keys.length; n++)
-    await put(ns + '/' + keys[n], values[n]);
+// Get net address
+function getAddress() {
+  // Scan interfaces
+  const nets = os.networkInterfaces();
+
+  for (const id in nets)
+  for (const net of nets[id]) {
+    // Probable ip address?
+    if ((net.family === 'IPv4' || net.family === 4) && !net.internal) {
+      system.address = net.address;
+      system.mask = net.netmask;
+      return;
+    }
+  }
 }
 
+// Get memory usage
+function getMemory() {
+  const memory = process.memoryUsage();
 
+  system.memory = bytes(os.totalmem());
+  system.free = bytes(os.freemem());
+  system.process = bytes(memory.rss);
+  system.heap = bytes(memory.heapTotal);
+  system.used = bytes(memory.heapUsed);
+}
 
+// Get profile descriptors
+function getDescriptors() {
+  const profiles = {};
 
+  const prefix = 'cns/network/profiles/*/name';
+  const keys = filter(cache, prefix);
 
+  for (const key in keys) {
+    const parts = key.split('/');
+    const profile = parts[3];
 
+    profiles[profile] = keys[key];
+  }
+  return profiles;
+}
 
+// Get network nodes
+function getNodes() {
+  const nodes = {};
 
+  const prefix = 'cns/network/nodes/*/name';
+  const keys = filter(cache, prefix);
 
-//
+  for (const key in keys) {
+    const parts = key.split('/');
+    const node = parts[3];
+
+    nodes[node] = keys[key];
+  }
+  return nodes;
+}
+
+// Get node contexts
+function getContexts(node) {
+  const contexts = {};
+
+  const prefix = 'cns/network/nodes/' + node + '/contexts/*/name';
+  const keys = filter(cache, prefix);
+
+  for (const key in keys) {
+    const parts = key.split('/');
+    const context = parts[5];
+
+    contexts[context] = keys[key];
+  }
+  return contexts;
+}
+
+// Get context profiles
+function getProfiles(node, context, role) {
+  const profiles = {};
+
+  const prefix = 'cns/network/nodes/' + node + '/contexts/' + context + '/' + role + '/*/version';
+  const keys = filter(cache, prefix);
+
+  for (const key in keys) {
+    const parts = key.split('/');
+    const profile = parts[7];
+
+    profiles[profile] = 'Version ' + Number(keys[key]);
+  }
+  return profiles;
+}
+
+// Filter keys
 function filter(keys, filter) {
   const result = {};
-
-/*
-if (filter.includes('*')) {
-
-  for (const key in keys) {
-    if (match(key, filters))
-      result[key] = keys[key];
-  }
-} else {
-  for (const key in keys) {
-    if (key.startsWith(filter))
-      result[key] = keys[key];
-  }
-}
-*/
-
   const filters = filter.split('/');
 
   for (const key in keys) {
-//    if (wildcard(key, filter))
-    if (match(key, filters))
+    if (compare(key, filters))
       result[key] = keys[key];
   }
   return result;
 }
 
-//
-function match(key, filters) {
+// Compare key with filters
+function compare(key, filters) {
   const keys = key.split('/');
 
   if (keys.length === filters.length) {
     for (var n = 0; n < keys.length; n++)
-      if (!wildcard(keys[n], filters[n])) return false;
+      if (!match(keys[n], filters[n])) return false;
 
     return true;
   }
   return false;
 }
 
-//
-function wildcard(match, filter) {
-  var esc = (s) => s.replace(/([.*+?^=!:${}()|\[\]\/\\])/g, '\\$1');
-  return new RegExp('^' + filter.split('*').map(esc).join('.*') + '$').test(match);
+// Wildcard match
+function match(text, filter) {
+  const esc = (s) => s.replace(/([.*+?^=!:${}()|\[\]\/\\])/g, '\\$1');
+  return new RegExp('^' + filter.split('*').map(esc).join('.*') + '$', 'i').test(text);
 }
 
+// Start dashboard server
+function start(host, port) {
+  // Stop previous
+  stop();
 
+  // Initialize express
+  const app = new express();
 
-// Broadcast to sockets
+  app.use(compression());
+  app.use(express.static(path.join(__dirname, '/public')));
+
+  debug('Creating webserver...');
+
+  // Create server
+  server = http.createServer(app)
+  // Started
+  .on('listening', () => {
+    // Create web socket
+    debug('Creating websocket...');
+    wss = expressws(app, server).getWss();
+
+    // Web socket request
+    app.ws('/', async (ws, req) => {
+      // Receive
+      ws.on('message', async (packet) => {
+        debug('Websocket request: ' + packet);
+        await receive(ws, packet);
+      })
+      // Close
+      .on('close', () => {
+        debug('Websocket disconnect...');
+      })
+      // Failure
+      .on('error', (e) => {
+        debug('Websocket error: ' + e.message);
+      });
+
+      // Initial changes
+      debug('Websocket connect...');
+
+      if (cache2 === undefined) {
+        const data = JSON.parse(await request('GET', 'https://cp.padi.io/profiles'));
+
+        cache2 = {};
+
+        for (const profile of data) {
+          const id = profile.name;
+          const name = profile.title || '';
+
+          cache2[id] = name;
+        }
+      }
+      broadcast(ws);
+    });
+
+    // All other requests
+    app.use((req, res) => {
+      res.status(404).send('<h1>Page not found</h1>');
+    });
+
+    print('CNS Dashboard running on http://' + host + ':' + port);
+  })
+  // Failure
+  .on('error', (e) => {
+    error(e);
+  });
+
+  // Start listening
+  server.listen(port);
+}
+
+var cache2;
+
+// Receive socket command
+async function receive(ws, packet) {
+  // Pipe to socket
+  pipe = ws;
+  buffer = '';    // use array and join('\n')?
+
+  try {
+    const data = JSON.parse(packet);
+    await command(data.command);
+  } catch(e) {
+    // Failure
+    stats.errors++;
+    broadcast();
+
+    error(e);
+  }
+
+// ws.send here? or if (pipe !== undefined)
+  pipe.send(JSON.stringify({
+    response: buffer
+  }));
+
+  pipe = undefined;
+}
+
+// Buffer pipe response
+function transmit(text) {
+  if (pipe !== undefined) {
+    buffer += text;
+    return true;
+  }
+  return false;
+}
+
+// Broadcast to clients
 function broadcast(ws) {
   if (wss === undefined) return;
 
@@ -2141,14 +2751,15 @@ function broadcast(ws) {
       version: pack.version,
       config: config,
       stats: stats,
-      keys: cache
+      keys: cache,
+      profiles: cache2
     });
 
-    // Single socket?
+    // Single client?
     if (ws !== undefined)
       ws.send(packet);
     else {
-      // Broadcast to all sockets
+      // Broadcast to all clients
       wss.clients.forEach((ws) => {
         ws.send(packet);
       });
@@ -2159,38 +2770,8 @@ function broadcast(ws) {
   }
 }
 
-// Receive socket command
-async function receive(ws, packet) {
-  // Pipe to socket
-  pipe = ws;
-  response = '';
-
-  try {
-    const data = JSON.parse(packet);
-    await command(data.command);
-  } catch(e) {
-    // Failure
-    error(e);
-  }
-
-  pipe.send(JSON.stringify({
-    response: response
-  }));
-
-  pipe = undefined;
-}
-
-// Buffer pipe response
-function transmit(text) {
-  if (pipe !== undefined) {
-    response += text;
-    return true;
-  }
-  return false;
-}
-
-// Close dashboard server
-function cease() {
+// Stop dashboard server
+function stop() {
   // Close socket server
   if (wss !== undefined) {
     debug('Closing websocket...');
@@ -2208,38 +2789,8 @@ function cease() {
   }
 }
 
-// Pull profile from server
-async function pull(url) {
-  const data = await getRequest('GET', url);
-  const profile = JSON.parse(data);
-
-  const name = profile.name;
-  const title = profile.title;
-  const versions = profile.versions || [];
-
-  const ns = 'cns/network/profiles/' + name + '/';
-
-  await put(ns + 'name', title || '');
-
-  for (var n = 0; n < versions.length; n++) {
-    const version = versions[n];
-    const properties = version.properties;
-
-    const vs = ns + 'versions/version' + (n + 1) + '/';
-
-    for (const property of properties) {
-      const ps = vs + 'properties/' + property.name + '/';
-
-      await put(ps + 'name', property.description || '');
-      await put(ps + 'provider', (property.server === null)?'yes':'no');
-      await put(ps + 'propagate', (property.propagate === null)?'yes':'no');
-      await put(ps + 'required', (property.required === null)?'yes':'no');
-    }
-  }
-}
-
 // Get http request
-function getRequest(method, url, data) {
+function request(method, url, data) {
   // I promise to
   return new Promise((resolve, reject) => {
     // Decode url
@@ -2255,7 +2806,7 @@ function getRequest(method, url, data) {
     };
 
     // Send request
-    debug('Fetching ' + url + '...');
+    debug('Requesting ' + url + '...');
 
     const req = handler
       .request(options, (res) => resolve(res))
@@ -2272,13 +2823,13 @@ function getRequest(method, url, data) {
     req.end();
   })
   .then((result) => {
-    // Get result
-    return getResponse(result);
+    // Get response
+    return response(result);
   });
 }
 
 // Get http response
-function getResponse(res) {
+function response(res) {
   // Status ok?
   if (res.statusCode !== 200)
     throw new Error(res.statusCode + ' ' + res.statusMessage);
@@ -2299,47 +2850,40 @@ function getResponse(res) {
 
 // Generation comment
 function comment() {
-  return '// Generated by ' + pack.name + ' on ' + new Date().toISOString() + '\n';
-}
-
-// Ensure extension
-function extension(file, ext) {
-  return file.endsWith(ext)?file:(file + ext);
+  return escape('// Generated by \\s on \\A\n');
 }
 
 // Store config
 async function store() {
   const file = path.resolve(process.cwd(), '.env');
-  const data = {};
 
-  // Copy config settings
-  for (const name in config) {
-    const value = config[name];
-
-    if (value !== '')
-      data[name] = value;
-  }
+  // Get config data
+  const data = {
+    CNS_HOST: config.host,
+    CNS_PORT: config.port,
+    CNS_USERNAME: config.username,
+    CNS_PASSWORD: config.password
+  };
 
   // Keep user settings
   for (const name in env.parsed) {
-    const value = config[name];
-
-    if (value === undefined)
+    if (data[name] === undefined)
       data[name] = env.parsed[name];
   }
 
-  // Construct env file
+  // Construct contents
   var text = '';
 
   for (const name in data)
     text += name + '=' + data[name] + '\n';
 
-  // Prompt to write
-  print('\nAbout to write to ' + file + ':\n\n' + text);
-  if (!await question()) return;
-
   // Write file
   write(file, comment() + text);
+}
+
+// Ensure extension
+function extension(file, ext) {
+  return file.endsWith(ext)?file:(file + ext);
 }
 
 // Read from file
@@ -2425,7 +2969,7 @@ function spawn(path) {
 function sleep(ms) {
   // I promise to
   return new Promise((resolve) => {
-    if (ms !== undefined) {
+    if (ms !== 0) {
       // Wait for timeout
       const timer = setTimeout(() => {
         signal = undefined;
@@ -2456,26 +3000,6 @@ function reverse(arr) {
   return res;
 }
 
-// Sanitize text value
-function sanitize(value) {
-  return value.toString().replaceAll('\n', ' ').trim();
-}
-
-// Get indent
-function indent(char) {
-  return char.repeat(Math.min(Math.max(options.indent, 0), 8));
-}
-
-// Get column count
-function columns() {
-  return options.columns || process.stdout.columns || 80;
-}
-
-// Get row count
-function rows() {
-  return options.rows || process.stdout.rows || 25;
-}
-
 // Log text to console
 function print(text) {
   if (!options.silent && !transmit(text + '\n'))
@@ -2497,13 +3021,8 @@ function error(e) {
 }
 
 // Catch terminate signal
-process.on('SIGINT', async () => {
+process.on('SIGINT', () => {
   print('\rAborted.');
-
-//  if (signal !== undefined) {
-//    signal();
-//    signal = undefined;
-//  }
   exit(1);
 });
 
