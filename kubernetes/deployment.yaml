@@ -1,0 +1,31 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cns-cli
+  namespace: cns-dev
+  labels:
+    app: cns-cli
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cns-cli
+  template:
+    metadata:
+      labels:
+        app: cns-cli
+    spec:
+      containers:
+      - name: cns-cli
+        image: us-central1-docker.pkg.dev/padi-staging/cnscp/cns-cli:latest
+        env:
+        - name: CNS_HOST
+          value: "http://etcd.test.cns.dev"
+        - name: CNS_PORT
+          value: "2379"
+        - name: CNS_USERNAME
+          value: "padi_admin"
+        envFrom:
+        - secretRef:
+            name: cns-password

@@ -10,7 +10,7 @@
   },
   "scripts": {
     "start": "node index",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dashboard": "node index dashboard"
   },
   "dependencies": {
     "colors": "^1.4.0",
