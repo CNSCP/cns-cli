@@ -442,7 +442,7 @@ quit
 | Name             | Description                      | Example                |
 |------------------|----------------------------------|------------------------|
 | $new             | Generate a new short form UUID   | 7jb1cjnXdQ6GQyFLAAyNdJ |
-| $uuid            | Generate a new UUID              | 483c69e7-54aa-40a3-bbd0-59e35cc5f437 |
+| $uuid            | Generate a new long form UUID    | 483c69e7-54aa-40a3-bbd0-59e35cc5f437 |
 | $rand            | Generate random number (0 - 99)  | 57                     |
 | $now             | Current ISO timestamp            | 2025-06-20T15:39:09.030Z |
 | $path            | Current key path                 | cns/network/nodes/node1 |

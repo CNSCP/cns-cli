@@ -1012,7 +1012,7 @@ async function connect() {
       const key = change.key.toString();
       const value = change.value.toString();
 
-//      debug('PUT ' + key + ' = ' + value);
+      debug('PUT ' + key + ' = ' + value);
       cache[key] = value;
 
       stats.updates++;
@@ -1023,7 +1023,7 @@ async function connect() {
       const key = change.key.toString();
       const value = change.value.toString();
 
-//      debug('DEL ' + key);
+      debug('DEL ' + key);
       delete cache[key];
 
       stats.updates++;
@@ -1130,7 +1130,7 @@ async function network() {
       'Network Orchestrator',
       'Network Token'
     ], [
-      cache[ns + 'name'] || 'My Network',
+      cache[ns + 'name'] || 'New Network',
       cache[ns + 'orchestrator'] || 'contexts',
       cache[ns + 'token'] || ''
     ]);
@@ -1238,7 +1238,7 @@ async function profiles(arg1) {
       'Profile Name',
       'Profile Version'
     ], [
-      cache[ns + 'name'] || 'My Profile',
+      cache[ns + 'name'] || 'New Profile',
       '1'
     ]);
 
@@ -1272,7 +1272,7 @@ async function profiles(arg1) {
         'Property is Required?',
         'Property can Propagate?'
       ], [
-        cache[ps + 'name'] || 'My Property',
+        cache[ps + 'name'] || 'New Property',
         cache[ps + 'provider'] || 'yes',
         cache[ps + 'required'] || 'no',
         cache[ps + 'propagate'] || 'yes'
@@ -1303,7 +1303,7 @@ async function profiles(arg1) {
         'Property is Required?',
         'Property can Propagate?'
       ], [
-        'My Property',
+        'New Property',
         'yes',
         'no',
         'yes'
@@ -1352,12 +1352,15 @@ async function profiles(arg1) {
 }
 
 // Configure node
-async function nodes(arg1) {
+async function nodes(arg1, arg2, arg3, arg4) {
   // Must be connected
   if (client === undefined)
     throw new Error(E_CONNECT);
 
-  const node = argument(arg1);
+  var node = argument(arg1);
+  var name = argument(arg2, 'New Node');
+  var upstream = argument(arg3, 'no');
+  var token = argument(arg4, '$uuid');
 
   // List nodes?
   if (node === undefined) {
@@ -1365,56 +1368,62 @@ async function nodes(arg1) {
     return;
   }
 
-  // Must be console
-  if (pipe !== undefined)
-    throw new Error(E_AVAILABLE);
-
-  // Output help
-  print('This utility will walk you through setting up a network node.');
-  print('It only covers the most common items, and tries to guess sensible defaults.\n');
-
-  print('Press ^C at any time to quit.\n');
-
-  // Ask questions
   const ns = 'cns/network/nodes/' + node + '/';
 
-  const answers = await questions([
-      'Node Name',
-      'Node Upstream',
-      'Node Token'
-    ], [
-      cache[ns + 'name'] || 'My Node',
-      cache[ns + 'upstream'] || '',
-      cache[ns + 'token'] || ''
-    ]);
+  // Edit in console?
+  if (pipe === undefined) {
+    // Output help
+    print('This utility will walk you through setting up a network node.');
+    print('It only covers the most common items, and tries to guess sensible defaults.\n');
 
-  if (answers === null) return;
+    print('Press ^C at any time to quit.\n');
 
-  // Prompt to write
-  print('\nAbout to publish properties:\n');
+    // Ask questions
+    const answers = await questions([
+        'Node Name',
+        'Node Upstream',
+        'Node Token'
+      ], [
+        cache[ns + 'name'] || name,
+        cache[ns + 'upstream'] || upstream,
+        cache[ns + 'token'] || token
+      ]);
 
-  print('name = ' + answers[0]);
-  print('upstream = ' + answers[1]);
-  print('token = ' + answers[2]);
+    if (answers === null) return;
 
-  if (!await confirmation()) return;
+    // Get answers
+    name = answers[0];
+    upstream = answers[1];
+    token = answers[2];
+
+    // Prompt to write
+    print('\nAbout to publish properties:\n');
+
+    print('name = ' + name);
+    print('upstream = ' + upstream);
+    print('token = ' + token);
+
+    if (!await confirmation()) return;
+  }
 
   // Update new values
-  await put(ns + 'name', answers[0]);
-  await put(ns + 'upstream', answers[1]);
-  await put(ns + 'token', answers[2]);
+  await put(ns + 'name', name);
+  await put(ns + 'upstream', upstream);
+  await put(ns + 'token', token);
 
   cd(ns);
 }
 
 // Configure context
-async function contexts(arg1, arg2) {
+async function contexts(arg1, arg2, arg3, arg4) {
   // Must be connected
   if (client === undefined)
     throw new Error(E_CONNECT);
 
-  const node = argument(arg1);
-  const context = argument(arg2);
+  var node = argument(arg1);
+  var context = argument(arg2);
+  var name = argument(arg3, 'New Context');
+  var token = argument(arg4, '$uuid');
 
   // List all contexts?
   if (node === undefined) {
@@ -1437,40 +1446,43 @@ async function contexts(arg1, arg2) {
     return;
   }
 
-  // Must be console
-  if (pipe !== undefined)
-    throw new Error(E_AVAILABLE);
-
-  // Output help
-  print('This utility will walk you through setting up a node context.');
-  print('It only covers the most common items, and tries to guess sensible defaults.\n');
-
-  print('Press ^C at any time to quit.\n');
-
-  // Ask questions
   const ns = 'cns/network/nodes/' + node + '/contexts/' + context + '/';
 
-  const answers = await questions([
-      'Context Name',
-      'Context Token'
-    ], [
-      cache[ns + 'name'] || 'My Context',
-      cache[ns + 'token'] || ''
-    ]);
+  // Edit in console?
+  if (pipe === undefined) {
+    // Output help
+    print('This utility will walk you through setting up a node context.');
+    print('It only covers the most common items, and tries to guess sensible defaults.\n');
 
-  if (answers === null) return;
+    print('Press ^C at any time to quit.\n');
 
-  // Prompt to write
-  print('\nAbout to publish properties:\n');
+    // Ask questions
+    const answers = await questions([
+        'Context Name',
+        'Context Token'
+      ], [
+        cache[ns + 'name'] || name,
+        cache[ns + 'token'] || token
+      ]);
 
-  print('name = ' + answers[0]);
-  print('token = ' + answers[1]);
+    if (answers === null) return;
 
-  if (!await confirmation()) return;
+    // Get answers
+    name = answers[0];
+    token = answers[1];
+
+    // Prompt to write
+    print('\nAbout to publish properties:\n');
+
+    print('name = ' + name);
+    print('token = ' + token);
+
+    if (!await confirmation()) return;
+  }
 
   // Update new values
-  await put(ns + 'name', answers[0]);
-  await put(ns + 'token', answers[1]);
+  await put(ns + 'name', name);
+  await put(ns + 'token', token);
 
   cd(ns);
 }
@@ -1485,7 +1497,7 @@ async function provider(arg1, arg2, arg3, arg4, arg5) {
   const context = argument(arg2);
   const profile = argument(arg3);
   const version = argument(arg4, 1);
-  const scope = argument(arg5, 'none');
+  const scope = argument(arg5, '');
 
   // List all providers?
   if (node === undefined) {
@@ -1532,20 +1544,10 @@ async function provider(arg1, arg2, arg3, arg4, arg5) {
   if (cache['cns/network/profiles/' + profile + '/name'] === undefined)
     throw new Error(E_FOUND + ': ' + profile);
 
-  // Must be console
-  if (pipe !== undefined)
-    throw new Error(E_AVAILABLE);
-
-  // Output help
-  print('This utility will walk you through setting up a provider capability.');
-  print('It only covers the most common items, and tries to guess sensible defaults.\n');
-
-  print('Press ^C at any time to quit.\n');
-
-  // Ask questions
   const ns = 'cns/network/nodes/' + node + '/contexts/' + context + '/provider/' + profile + '/';
   const ps = 'cns/network/profiles/' + profile + '/versions/version' + version + '/properties/';
 
+  // Get property values
   const prompts = [];
   const defaults = [];
   const names = [];
@@ -1557,8 +1559,8 @@ async function provider(arg1, arg2, arg3, arg4, arg5) {
     const property = parts[7];
 
     const provider = cache[ps + property + '/provider'];
-    const required = cache[ps + property + '/required'];
-    const propagate = cache[ps + property + '/propagate'];
+//    const required = cache[ps + property + '/required'];
+//    const propagate = cache[ps + property + '/propagate'];
 
     // Provider property?
     if (provider === 'yes') {
@@ -1568,29 +1570,41 @@ async function provider(arg1, arg2, arg3, arg4, arg5) {
     }
   }
 
-  const answers = await questions(
-    prompts,
-    defaults);
+  var answers;
 
-  if (answers === null) return;
+  // Edit in console?
+  if (pipe === undefined) {
+    // Output help
+    print('This utility will walk you through setting up a provider capability.');
+    print('It only covers the most common items, and tries to guess sensible defaults.\n');
 
-  // Prompt to write
-  print('\nAbout to publish properties:\n');
+    print('Press ^C at any time to quit.\n');
 
-  print('version = ' + version);
-  print('scope = ' + scope);
+    // Ask questions
+    answers = await questions(
+      prompts,
+      defaults);
 
-  for (var n = 0; n < names.length; n++)
-    print(names[n] + ' = ' + answers[n]);
+    if (answers === null) return;
 
-  if (!await confirmation()) return;
+    // Prompt to write
+    print('\nAbout to publish properties:\n');
+
+    print('version = ' + version);
+    print('scope = ' + scope);
+
+    for (var n = 0; n < names.length; n++)
+      print(names[n] + ' = ' + answers[n]);
+
+    if (!await confirmation()) return;
+  }
 
   // Update new values
   await put(ns + 'version', version);
   await put(ns + 'scope', scope);
 
   for (var n = 0; n < names.length; n++)
-    await put(ns + 'properties/' + names[n], answers[n]);
+    await put(ns + 'properties/' + names[n], answers?answers[n]:defaults[n]);
 
   cd(ns);
 }
@@ -1605,7 +1619,7 @@ async function consumer(arg1, arg2, arg3, arg4, arg5) {
   const context = argument(arg2);
   const profile = argument(arg3);
   const version = argument(arg4, 1);
-  const scope = argument(arg5, 'none');
+  const scope = argument(arg5, '');
 
   // List all consumers?
   if (node === undefined) {
@@ -1652,20 +1666,10 @@ async function consumer(arg1, arg2, arg3, arg4, arg5) {
   if (cache['cns/network/profiles/' + profile + '/name'] === undefined)
     throw new Error(E_FOUND + ': ' + profile);
 
-  // Must be console
-  if (pipe !== undefined)
-    throw new Error(E_AVAILABLE);
-
-  // Output help
-  print('This utility will walk you through setting up a consumer capability.');
-  print('It only covers the most common items, and tries to guess sensible defaults.\n');
-
-  print('Press ^C at any time to quit.\n');
-
-  // Ask questions
   const ns = 'cns/network/nodes/' + node + '/contexts/' + context + '/consumer/' + profile + '/';
   const ps = 'cns/network/profiles/' + profile + '/versions/version' + version + '/properties/';
 
+  // Get property values
   const prompts = [];
   const defaults = [];
   const names = [];
@@ -1677,8 +1681,8 @@ async function consumer(arg1, arg2, arg3, arg4, arg5) {
     const property = parts[7];
 
     const provider = cache[ps + property + '/provider'];
-    const required = cache[ps + property + '/required'];
-    const propagate = cache[ps + property + '/propagate'];
+//    const required = cache[ps + property + '/required'];
+//    const propagate = cache[ps + property + '/propagate'];
 
     // Consumer property?
     if (provider !== 'yes') {
@@ -1688,29 +1692,41 @@ async function consumer(arg1, arg2, arg3, arg4, arg5) {
     }
   }
 
-  const answers = await questions(
-    prompts,
-    defaults);
+  var answers;
 
-  if (answers === null) return;
+  // Edit in console?
+  if (pipe === undefined) {
+    // Output help
+    print('This utility will walk you through setting up a consumer capability.');
+    print('It only covers the most common items, and tries to guess sensible defaults.\n');
 
-  // Prompt to write
-  print('\nAbout to publish properties:\n');
+    print('Press ^C at any time to quit.\n');
 
-  print('version = ' + version);
-  print('scope = ' + scope);
+    // Ask questions
+    answers = await questions(
+      prompts,
+      defaults);
 
-  for (var n = 0; n < names.length; n++)
-    print(names[n] + ' = ' + answers[n]);
+    if (answers === null) return;
 
-  if (!await confirmation()) return;
+    // Prompt to write
+    print('\nAbout to publish properties:\n');
+
+    print('version = ' + version);
+    print('scope = ' + scope);
+
+    for (var n = 0; n < names.length; n++)
+      print(names[n] + ' = ' + answers[n]);
+
+    if (!await confirmation()) return;
+  }
 
   // Update new values
   await put(ns + 'version', version);
   await put(ns + 'scope', scope);
 
   for (var n = 0; n < names.length; n++)
-    await put(ns + 'properties/' + names[n], answers[n]);
+    await put(ns + 'properties/' + names[n], answers?answers[n]:defaults[n]);
 
   cd(ns);
 }
@@ -1935,8 +1951,10 @@ async function get(arg1) {
   // Success
   display(key, value);
 
-  stats.reads++;
+stats.reads++;
+if (pipe === undefined) {
   broadcast();
+}
 }
 
 // Put key value
@@ -1959,7 +1977,9 @@ async function put(arg1, arg2) {
 
   // Success
   stats.writes++;
+if (pipe === undefined) {
   broadcast();
+}
 }
 
 // Delete key
@@ -1980,7 +2000,9 @@ async function del(arg1) {
 
   // Success
   stats.writes++;
+if (pipe === undefined) {
   broadcast();
+}
 }
 
 // Purge keys
@@ -2013,7 +2035,9 @@ async function purge(arg1) {//, arg2) {
 
   // Success
   stats.writes++;
+if (pipe === undefined) {
   broadcast();
+}
 }
 
 // Disconnect client
@@ -2681,9 +2705,14 @@ function start(host, port) {
 
         for (const profile of data) {
           const id = profile.name;
-          const name = profile.title || '';
 
-          cache2[id] = name;
+          const name = profile.title || '';
+          const versions = profile.versions || [];
+
+          cache2[id] = {
+            name: name,
+            versions: versions.length
+          }
         }
       }
       broadcast(ws);
@@ -2725,7 +2754,7 @@ async function receive(ws, packet) {
   }
 
 // ws.send here? or if (pipe !== undefined)
-  pipe.send(JSON.stringify({
+  ws.send(JSON.stringify({
     response: buffer
   }));
 

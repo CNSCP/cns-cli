@@ -16,32 +16,34 @@
 :root {
   --font: "font";
   --icons: "icons";
-  --screen: #fafafa;
-  --text: #202020;
-  --title: #f5f5f5;
-  --table: #ffffff;
-  --header: #888888;
+  --screen: #f0f0f0;
+  --title: #f8f8f8;
+  --panel: #ffffff;
   --border: #e0e0e0;
-  --anchor: #0d2192;
+  --header: #888888;
+  --text: #202020;
+  --tip: #ffffff;
   --button: #888888;
-  --hover: #f0f0f0;
-  --hilight: #0d2192;
   --focus: #0d2192;
+  --hover: #f4f4f4;
+  --hilight: #0d2192;
+  --lolight: #f8f8f8;
   --error: #af0606;
 }
 
 body[theme="dark"] {
   --screen: #303030;
-  --text: #ffffff;
   --title: #212121;
-  --table: #424242;
-  --header: #c0c0c0;
+  --panel: #424242;
   --border: #595959;
-  --anchor: #2196f3;
-  --button: #888888;
+  --header: #a0a0a0;
+  --text: #ffffff;
+  --tip: #ffffff;
+  --button: #a0a0a0;
+  --focus: #2196f3;
   --hover: #505050;
   --hilight: #ffffff;
-  --focus: #2196f3;
+  --lolight: #393939;
   --error: #ed4337;
 }
 
@@ -83,9 +85,17 @@ h3 {
 }
 
 h4 {
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 400;
-  margin: 0 0 16px 0;
+  margin: 0 0 14px 0;
+}
+
+h5 {
+  font-size: 12px;
+  font-weight: 400;
+  white-space: nowrap;
+  color: var(--header);
+  margin: 2.5px 0;
 }
 
 p {
@@ -109,9 +119,14 @@ i {
   vertical-align: middle;
 }
 
+/*u {
+  text-decoration: none;
+  color: var(--error);
+}*/
+
 a {
   text-decoration: none;
-  color: var(--anchor);
+  color: var(--focus);
 }
 
 a:hover,
@@ -153,8 +168,8 @@ button:not([icon]) i {
   margin: 0 8px 0 -8px;
 }
 
-button:focus-visible,
-button:hover {
+button:hover,
+button:focus-visible {
   background-color: var(--hover);
   cursor: pointer;
 }
@@ -167,22 +182,13 @@ h1 button {
   float: right;
 }
 
-/*
-h2 button {
-  font-size: inherit;
-  text-transform: none;
-  margin: -8px 8px -8px -16px;
-}
-
-h2 button:hover {
-  background-color: transparent;
-  color: var(--hilight);
-}*/
-
 label {
   font-size: 12px;
+  display: block;
   white-space: nowrap;
   color: var(--header);
+  line-height: 16px;
+  margin: 1px 0 3px 0;
 }
 
 label:has(input[type="checkbox"]),
@@ -196,6 +202,7 @@ input {
 }
 
 input[type="text"],
+input[type="number"],
 input[type="password"],
 input[type="email"],
 input[type="url"] {
@@ -205,23 +212,36 @@ input[type="url"] {
   color: var(--text);
   border: none;
   border-bottom: 2px solid var(--border);
+  line-height: 21px;
   margin: 0 0 16px 0;
   padding: 0 0 2px 0;
   width: 100%;
 }
 
-input[type="text"]:focus-visible,
-input[type="password"]:focus-visible,
-input[type="email"]:focus-visible,
-input[type="url"]:focus-visible {
+input[type="text"]:focus,
+input[type="number"]:focus,
+input[type="password"]:focus,
+input[type="email"]:focus,
+input[type="url"]:focus {
   border-color: var(--focus);
 }
 
 input[type="text"]:invalid,
+input[type="number"]:invalid,
 input[type="password"]:invalid,
 input[type="email"]:invalid,
 input[type="url"]:invalid {
-  border-color: #ff5252;
+  border-color: var(--error);
+}
+
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  appearance: textfield;
 }
 
 input[type="checkbox"],
@@ -231,8 +251,8 @@ input[type="radio"] {
   height: 0.875rem;
 }
 
-input[type="checkbox"]:focus-visible,
-input[type="radio"]:focus-visible {
+input[type="checkbox"]:focus,
+input[type="radio"]:focus {
   outline: auto;
   outline-color: var(--focus);
 }
@@ -253,14 +273,15 @@ textarea {
   width: 100%;
 }
 
-textarea:focus-visible {
+textarea:focus {
   border-color: var(--focus);
 }
 
 select {
   font-family: var(--font);
   font-size: 15px;
-  background: none;
+  appearance: none;
+  background: url('data:image/svg+xml;utf-8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><path d="M7 10 l7 7 7 -7 z" fill="grey"/></svg>') 100% 50% no-repeat;
   color: var(--text);
   border: none;
   border-bottom: 2px solid var(--border);
@@ -269,12 +290,20 @@ select {
   width: 100%;
 }
 
-select:focus-visible {
+select:empty {
+  pointer-events: none;
+}
+
+select:focus {
   border-color: var(--focus);
 }
 
 select:invalid {
-  border-color: #ff5252;
+  border-color: var(--error);
+}
+
+option {
+  width: 200px;
 }
 
 center {
@@ -306,7 +335,7 @@ mark {
   display: inline-block;
   white-space: nowrap;
   background-color: var(--button);
-  color: var(--table);
+  color: var(--panel);
   border-radius: 16px;
   padding: 0 16px;
   margin: 2px 0;
@@ -369,12 +398,18 @@ menu hr {
 nav {
   display: flex;
   flex-direction: column;
-  background-color: var(--table);
-  border-right: 1px solid var(--border);
+/*  overflow-y: scroll;*/
+  background-color: var(--panel);
+  box-shadow: 0 5px 5px -3px rgba(0, 0, 0, 0.2), 0 8px 10px 1px rgba(0, 0, 0, 0.14), 0 3px 14px 2px rgba(0, 0, 0, 0.12);
+/*  border-right: 1px solid var(--border);*/
 }
 
 nav > div {
   flex-grow: 1;
+  background-color: var(--lolight);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  min-height: 20px;
 }
 
 nav button {
@@ -470,7 +505,6 @@ main:has(header):has(footer) article {
 }
 
 section {
-  flex-direction: column;
   overflow: scroll;
   box-sizing: border-box;
   width: 100%;
@@ -480,10 +514,10 @@ section {
 
 aside {
   overflow: scroll;
-  background-color: var(--table);
+  background-color: var(--panel);
   box-sizing: border-box;
   box-shadow: 0 5px 5px -3px rgba(0, 0, 0, 0.2), 0 8px 10px 1px rgba(0, 0, 0, 0.14), 0 3px 14px 2px rgba(0, 0, 0, 0.12);
-  padding: 20px;
+  padding: 16px 20px 22px 20px;
   margin-bottom: 16px;
 }
 
@@ -496,13 +530,7 @@ aside:empty {
 }
 
 form {
-/*
-  background-color: var(--table);
-*/
   box-sizing: border-box;
-/*  box-shadow: 0 5px 5px -3px rgba(0, 0, 0, 0.2), 0 8px 10px 1px rgba(0, 0, 0, 0.14), 0 3px 14px 2px rgba(0, 0, 0, 0.12);*/
-/*  padding: 20px;*/
-/*  margin: 0 0 16px 0;*/
 }
 
 form input:has(+button[icon]),
@@ -511,80 +539,168 @@ form select:has(+button[icon]) {
   width: calc(100% - 50px);
 }
 
+form input + button[icon],
+form select + button[icon] {
+  float: right;
+}
+
+dialog {
+  background: var(--panel);
+  color: var(--text);
+  border: none;
+  box-shadow: 0 5px 5px -3px rgba(0, 0, 0, 0.2), 0 8px 10px 1px rgba(0, 0, 0, 0.14), 0 3px 14px 2px rgba(0, 0, 0, 0.12);
+  padding: 0;
+  min-width: 400px;
+  user-select: none;
+}
+
+dialog::backdrop {
+  background-color: rgba(0, 0, 0, 0.35);
+}
+
+dialog h1 {
+  background-color: var(--title);
+  text-align: center;
+  margin: 0;
+  padding: 10px 64px;
+}
+
+dialog h1 button[icon] {
+  position: absolute;
+  right: 10px;
+  margin: 0;
+}
+
+dialog form {
+  margin: 20px;
+}
+
+dialog h4 {
+  text-align: center;
+  margin: 16px 0;
+}
+
+dialog p {
+  text-align: center;
+}
+
+dialog button {
+  margin-top: 16px;
+  width: 120px;
+}
+
+dialog button:last-of-type {
+  float: right;
+}
+
 table {
-  background-color: var(--table);
-/*  box-shadow: 0 5px 5px -3px rgba(0, 0, 0, 0.2), 0 8px 10px 1px rgba(0, 0, 0, 0.14), 0 3px 14px 2px rgba(0, 0, 0, 0.12);*/
-  border-collapse: collapse;
-/*  margin: 0 0 15px 0;*/
+  border-spacing: 0;
   width: 100%;
 }
 
+table caption {
+  font-size: 14px;
+  color: var(--header);
+  box-sizing: border-box;
+  text-align: left;
+  text-indent: 20px;
+  white-space: nowrap;
+  caption-side: bottom;
+  line-height: 49px;
+  border-top: 1px solid var(--border);
+  height: 50px;
+}
+
 table tr {
-  height: 52px;
+  height: 50px;
 }
 
 table th {
   font-size: 12px;
   font-weight: 400;
+  color: var(--header);
+  box-sizing: border-box;
   white-space: nowrap;
   text-align: left;
-  vertical-align: bottom;
-  color: var(--header);
-  padding: 10px 20px;
+  padding: 0 20px;
 }
 
 table td {
   font-size: 14px;
+  box-sizing: border-box;
   white-space: nowrap;
+  border-top: 1px solid var(--border);
   padding: 4px 20px;
 }
 
-/*
-table td span,
-table td a {
-  white-space: nowrap;
-}
-*/
-/*
-table td button span {
-  padding-left: 16px;
-}
-*/
-
-table td:first-of-type:has(button[icon]) {
+table th:first-child:has(> i),
+table td:first-child:has(> i) {
+  color: var(--header);
+  text-align: center;
   padding-right: 0;
 }
 
-/*table td button {
-  margin: 0;
-  visibility: hidden;
+table th:first-child > i,
+table td:first-child > i {
+  padding: 6px;
+}
+
+table th:last-child:empty,
+table th:last-child:has(> button[icon]) {
+  text-align: right;
+  width: 100%;
+}
+
+table td:first-child:has(> button[icon]) {
+  padding-right: 0;
+}
+
+table td:last-child:has(> button[icon]) {
+  text-align: right;
+}
+
+/*table tr:hover {
+  background-color: var(--border);
 }*/
 
-/*table tr:hover td button {
+/*
+table td:last-of-type > button {
+  margin: 0;
+  visibility: hidden;
+}
+
+table tr:hover > td:last-of-type > button {
   visibility: visible;
 }*/
 
-table tr:not(:last-child) > th,
-table tr:not(:last-child) > td {
-  border-bottom: 1px solid var(--border);
+table tr[expand]:empty {
+  display: none;
 }
-
-/*
-table tr[expand] {
-  background-color: var(--title);
-}*/
 
 table tr[expand] > td {
   padding: 0;
 }
 
-table tr[expand] > td:first-child {
-  border-right: 1px solid var(--border);
+table tr[expand] > td:nth-child(1) {
+  background-color: var(--lolight);
+}
+
+table tr[expand] > td:nth-child(2) > form,
+table tr[expand] > td:nth-child(2) > table > tbody > tr:not([expand]) > th:first-child,
+table tr[expand] > td:nth-child(2) > table > tbody > tr:not([expand]) > td:first-child,
+table tr[expand] > td:nth-child(2) > table > caption {
+  border-left: 1px solid var(--border);
 }
 
 table form {
   white-space: wrap;
-  padding: 10px 20px 0 20px;
+  padding: 12px 20px 0 20px;
+}
+
+table form input,
+table form textarea,
+table form select {
+  font-size: 14px !important;
 }
 
 /* ----- */
@@ -593,18 +709,50 @@ table form {
   outline: none;
 }
 
-main table td,
+main table td:not(:has(label)),
 main pre {
   user-select: text;
 }
 
 ::placeholder {
-  text-transform: none;
   color: var(--button);
 }
 
-[online] {
+[hidden] {
+  display: none;
 }
+
+[selected] {
+  color: var(--hilight);
+}
+
+[raised]:not(:active) {
+  box-shadow: 0 4px 5px 0 rgba(0, 0, 0, 0.14), 0 1px 10px 0 rgba(0, 0, 0, 0.12), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
+}
+
+[primary] {
+  color: var(--hilight);
+}
+
+[secondary] {
+  color: var(--button);
+}
+
+[error] {
+  color: var(--error);
+}
+
+[readonly] {
+  color: var(--header) !important;
+  border-color: var(--border) !important;
+}
+
+[disabled] {
+  color: var(--border) !important;
+  pointer-events: none;
+}
+
+/* Offline */
 
 [offline] {
   font-size: 14px;
@@ -623,56 +771,10 @@ main pre {
   margin-right: 16px;
 }
 
-[selected] {
-  color: var(--hilight);
-}
-
-[raised] {
-  box-shadow: 0 4px 5px 0 rgba(0, 0, 0, 0.14), 0 1px 10px 0 rgba(0, 0, 0, 0.12), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
-}
-
-[primary] {
-  color: var(--hilight);
-}
-
-[secondary] {
-  color: var(--button);
-}
-
-[error] {
-  color: var(--error);
-}
-
-/*
-[indent="1"] {
-  text-indent: 16px;
-}
-
-[indent="2"] {
-  text-indent: 32px;
-}
-
-[indent="3"] {
-  text-indent: 48px;
-}
-
-[indent="4"] {
-  text-indent: 64px;
-}
-*/
-
-[hidden] {
-  display: none;
-}
-
-[disabled] {
-  color: var(--border) !important;
-  pointer-events: none;
-}
+/* Tooltip */
 
 [data-tip] {
   position: relative;
-  transition: opacity 0.2s;
 }
 
 [data-tip]:before {
@@ -680,8 +782,8 @@ main pre {
   font-size: 12px;
   font-weight: 600;
   position: absolute;
-  background: var(--border);
-  color: var(--text);
+  background: var(--focus);
+  color: var(--tip);
   text-align: center;
   text-transform: none;
   white-space: nowrap;
@@ -704,7 +806,7 @@ main pre {
 }
 
 [data-pos="left"]:before {
-  right: 110%;
+  right: 120%;
   transform: translate(0, -15%);
 }
 
@@ -714,7 +816,7 @@ main pre {
 }
 
 [data-pos="right"]:before {
-  left: 110%;
+  left: 120%;
   transform: translate(0, -15%);
 }
 
@@ -733,11 +835,16 @@ main pre {
   transition: opacity 0.2s ease, background-color 0.15s ease, background-size 0.15s ease;
 }
 
-form button {
+[data-tip]:before {
+  transition: opacity 0.2s ease;
+}
+
+button {
   transition: background-color 0.2s ease;
 }
 
 input[type="text"],
+input[type="number"],
 input[type="password"],
 input[type="email"],
 input[type="url"],
@@ -745,7 +852,8 @@ textarea {
   transition: border-color 0.2s ease;
 }
 
-main:not([hidden]) sub::before {
+[spin],
+article:not([hidden]) sub::before {
   animation: spin 1.2s linear infinite;
 }
 
