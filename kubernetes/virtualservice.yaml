@@ -1,0 +1,19 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: cns-cli
+  namespace: cns-dev
+spec:
+  hosts:
+  - "dashboard.test.cns.dev"
+  gateways:
+  - test-cns-dev
+  http:
+  - match:
+    - uri:
+        prefix: /
+    route:
+    - destination:
+        host: cns-cli
+        port:
+          number: 8080
