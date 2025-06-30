@@ -10,6 +10,6 @@ spec:
       name: cns-cli
       port: 8080
   selector:
-    name: cns-cli
+    app: cns-cli
   type: NodePort
 
