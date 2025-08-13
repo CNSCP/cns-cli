@@ -1,0 +1,10 @@
+{
+    "js": {
+        "type": "putout",
+        "putout": {
+            "quote": "'",
+            "mangle": false,
+            "mangleClassNames": false
+        }
+    }
+}

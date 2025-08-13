@@ -1,6 +1,6 @@
 {
   "name": "cns-cli",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "CNS CLI",
   "author": "Padi, Inc",
   "license": "ISC",
@@ -10,7 +10,9 @@
   },
   "scripts": {
     "start": "node index",
-    "dashboard": "node index dashboard"
+    "dashboard": "node index dashboard",
+    "docs": "jsdoc2md ./public/cns.js > ./docs/cns.md",
+    "minify": "minify ./public/cns.js > ./public/cns.min.js"
   },
   "dependencies": {
     "colors": "^1.4.0",

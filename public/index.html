@@ -9,6 +9,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
   <link rel="stylesheet" href="main.css">
+
+  <script src="cns.js"></script>
   <script src="main.js"></script>
 
   <title>CNS Dashboard</title>
@@ -23,7 +25,6 @@
       <nav list="collapse">
         <button id="list" ripple primary><i>chevron_left</i></button>
         <button id="overview" ripple selected><i>home</i><span>Overview</span></button>
-        <button id="config" ripple><i>settings</i><span>Configuration</span></button>
         <button id="network" ripple><i>wifi</i><span>Network</span></button>
         <button id="profiles" ripple><i>extension</i><span>Profiles</span></button>
         <button id="nodes" ripple><i>real_estate_agent</i><span>Nodes</span></button>
@@ -36,43 +37,33 @@
       <section view="overview">
         <h1>Overview<button id="help" data-tip="Help" data-pos="left" icon primary><i>live_help</i></button></h1>
         <aside hidden>
-          <h4>Did you know?</h4>
-          <p>Some help here...</p>
+          <div>
+            <h4>Did you know?</h4>
+            <ul>
+              <li>Some help here...</li>
+            </ul>
+          </div>
         </aside>
+        <aside offline hidden><i>wifi_off</i>Network connection is currently offline</aside>
         <aside id="overview-status"></aside>
-        <aside id="overview-messages"></aside>
-        <div offline hidden><i>wifi_off</i>Network connection is currently offline</div>
-      </section>
-      <section view="config" hidden>
-        <h1>Configuration<button id="help" data-tip="Help" data-pos="left" icon primary><i>live_help</i></button></h1>
-        <aside hidden>
-          <h4>Did you know?</h4>
-          <p>Some help here...</p>
-        </aside>
-        <aside>
-          <form id="config-form">
-            <label>Network host</label>
-            <input id="config-host" type="text" maxlength="256" pattern="^([0-9]{1,3}\.){3}[0-9]{1,3}|((http|https):\/\/|\/)(.+)$" data-key="host" placeholder="127.0.0.1"/>
-            <label>Network port</label>
-            <input id="config-port" type="text" maxlength="8" pattern="[0-9]*" data-key="port" placeholder="2379"/>
-            <label>Network username</label>
-            <input id="config-username" type="text" maxlength="16" data-key="username" placeholder="root"/>
-            <label>Network password</label>
-            <input id="config-password" type="text" maxlength="16" data-key="password"/>
-          </form>
-        </aside>
-        <div offline hidden><i>wifi_off</i>Network connection is currently offline</div>
+        <aside id="watchers-list" online hidden></aside>
+        <aside id="messages-list"></aside>
       </section>
       <section view="network" hidden>
         <h1>Network<button id="help" data-tip="Help" data-pos="left" icon primary><i>live_help</i></button></h1>
         <aside hidden>
-          <h4>Did you know?</h4>
-          <p>Some help here...</p>
+          <div>
+            <h4>Did you know?</h4>
+            <ul>
+              <li>Some help here...</li>
+            </ul>
+          </div>
         </aside>
+        <aside offline hidden><i>wifi_off</i>Network connection is currently offline</aside>
         <aside online hidden>
           <form id="network-form">
             <label>Network name</label>
-            <input id="network-name" type="text" maxlength="128" data-key="cns/network/name" placeholder="New Network"/>
+            <input id="network-name" type="text" maxlength="128" data-key="cns/network/name" placeholder="New Network" autofocus/>
             <label>Network orchestrator</label>
             <select id="network-orchestrator" data-key="cns/network/orchestrator">
               <option value="none" selected>None</option>
@@ -80,92 +71,173 @@
               <option value="contexts">Contexts</option>
             </select>
             <label>Network token</label>
-            <input id="network-token" maxlength="128" data-key="cns/network/token" type="text" placeholder=""/>
+            <input id="network-token" maxlength="128" data-key="cns/network/token" type="text" placeholder="" readonly/>
           </form>
         </aside>
-        <div offline hidden><i>wifi_off</i>Network connection is currently offline</div>
       </section>
       <section view="profiles" hidden>
         <h1>Profiles<button id="help" data-tip="Help" data-pos="left" icon primary><i>live_help</i></button></h1>
         <aside hidden>
-          <h4>Did you know?</h4>
-          <p>Some help here...</p>
+          <div>
+            <h4>Did you know?</h4>
+            <ul>
+              <li>Some help here...</li>
+            </ul>
+          </div>
         </aside>
+        <aside offline hidden><i>wifi_off</i>Network connection is currently offline</aside>
         <aside online hidden>
           <form id="profiles-form">
-            <label>Search for profile</label>
-            <input id="profiles-search" type="text" maxlength="128" placeholder="example.profile.id or name"/>
+            <label>Search profiles</label>
+            <input id="profiles-search" type="text" maxlength="128" placeholder="profile or name" autofocus/>
             <button id="profiles-enter" icon primary><i>keyboard_return</i></button>
           </form>
         </aside>
         <aside id="profiles-list" online hidden></aside>
-        <div offline hidden><i>wifi_off</i>Network connection is currently offline</div>
       </section>
       <section view="nodes" hidden>
         <h1>Nodes<button id="help" data-tip="Help" data-pos="left" icon primary><i>live_help</i></button></h1>
         <aside hidden>
-          <h4>Did you know?</h4>
-          <p>Some help here...</p>
+          <div>
+            <h4>Did you know?</h4>
+            <ul>
+              <li>Some help here...</li>
+            </ul>
+          </div>
         </aside>
+        <aside offline hidden><i>wifi_off</i>Network connection is currently offline</aside>
         <aside online hidden>
           <form id="nodes-form">
-            <label>Search for node</label>
-            <input id="nodes-search" type="text" maxlength="128" placeholder="node, context or name"/>
+            <label>Search nodes</label>
+            <input id="nodes-search" type="text" maxlength="128" placeholder="node or name" autofocus/>
             <button id="nodes-enter" icon primary><i>keyboard_return</i></button>
           </form>
         </aside>
         <aside id="nodes-list" online hidden></aside>
-        <div offline hidden><i>wifi_off</i>Network connection is currently offline</div>
       </section>
       <section view="keys" hidden>
         <h1>Keys<button id="help" data-tip="Help" data-pos="left" icon primary><i>live_help</i></button></h1>
         <aside hidden>
-          <h4>Did you know?</h4>
-          <p>Some help here...</p>
+          <div>
+            <h4>Did you know?</h4>
+            <ul>
+              <li>Some help here...</li>
+            </ul>
+          </div>
         </aside>
+        <aside offline hidden><i>wifi_off</i>Network connection is currently offline</aside>
         <aside online hidden>
           <form id="keys-form">
-            <label>Search for key</label>
-            <input id="keys-search" type="text" maxlength="1024" placeholder="key or value"/>
+            <label>Search keys</label>
+            <input id="keys-search" type="text" maxlength="1024" placeholder="key or value" autofocus/>
             <button id="keys-enter" icon primary><i>keyboard_return</i></button>
           </form>
         </aside>
         <aside id="keys-list" online hidden></aside>
-        <div offline hidden><i>wifi_off</i>Network connection is currently offline</div>
       </section>
       <section view="console" hidden>
         <h1>Console<button id="help" data-tip="Help" data-pos="left" icon primary><i>live_help</i></button></h1>
         <aside hidden>
-          <h4>Did you know?</h4>
-          <p>Some help here...</p>
+          <div>
+            <h4>Did you know?</h4>
+            <ul>
+              <li>Some help here...</li>
+            </ul>
+          </div>
         </aside>
         <aside>
           <form id="command-form">
             <label>Enter console command</label>
-            <input id="command-line" type="text" maxlength="1024" placeholder="Type &quot;help&quot; for more information"/>
+            <input id="command-line" type="text" maxlength="1024" placeholder="Type &quot;help&quot; for more information" autofocus/>
             <button id="command-enter" icon primary><i>keyboard_return</i></button>
           </form>
         </aside>
         <aside id="command-response"></aside>
-        <div offline hidden><i>wifi_off</i>Network connection is currently offline</div>
       </section>
       <section view="about" hidden>
         <h1>About<button id="help" data-tip="Help" data-pos="left" icon primary><i>live_help</i></button></h1>
         <aside hidden>
-          <h4>Did you know?</h4>
-          <p>Some help here...</p>
+          <div>
+            <h4>Did you know?</h4>
+            <ul>
+              <li>Some help here...</li>
+            </ul>
+          </div>
         </aside>
         <aside>
-          <h3>CNS Dashboard</h3>
-          <p>Version <span id="version">-</span></p>
-          <p>Copyright 2025, Padi Inc.<br/>All rights reserved.</p>
-          <p>
-            <a href="https://github.com/CNSCP/cns-cli/LICENSE.md" target="_blank">License and Terms of Use</a><br/>
-            <a href="https://github.com/CNSCP/cns-cli" target="_blank">View on GitHub</a>
-          </p>
+          <div>
+            <h3>CNS Dashboard</h3>
+            <p>Version <span id="version">-</span></p>
+            <p>Copyright 2025, Padi Inc.<br/>All rights reserved.</p>
+            <p>
+              <a href="https://github.com/CNSCP/cns-cli/LICENSE.md" target="_blank">License and Terms of Use</a><br/>
+              <a href="https://github.com/CNSCP/cns-cli" target="_blank">View on GitHub</a>
+            </p>
+          </div>
         </aside>
       </section>
     </article>
+    <dialog id="nodes-dialog" closeby="none">
+      <h1>Add Node<button id="nodes-dialog-close" icon primary><i>close</i></button></h1>
+      <form id="nodes-dialog-form">
+        <label>Node identifier</label>
+        <input id="nodes-dialog-id" type="text" maxlength="128" pattern="^[A-Za-z]([A-Za-z0-9]*)" placeholder="leave blank for uuid" autofocus/>
+        <button id="nodes-dialog-ok" primary raised>Add</button>
+        <button id="nodes-dialog-cancel" raised>Cancel</button>
+      </form>
+    </dialog>
+    <dialog id="contexts-dialog" closeby="none">
+      <h1>Add Context<button id="contexts-dialog-close" icon primary><i>close</i></button></h1>
+      <form id="contexts-dialog-form">
+        <label>Context identifier</label>
+        <input id="contexts-dialog-id" type="text" maxlength="128" pattern="^[A-Za-z]([A-Za-z0-9]*)" placeholder="leave blank for uuid" autofocus/>
+        <button id="contexts-dialog-ok" primary raised>Add</button>
+        <button id="contexts-dialog-cancel" raised>Cancel</button>
+      </form>
+    </dialog>
+    <dialog id="caps-dialog" closeby="none">
+      <h1>Add Capability<button id="caps-dialog-close" icon primary><i>close</i></button></h1>
+      <form id="caps-dialog-form">
+        <label>Capability role</label>
+        <select id="caps-dialog-role" autofocus>
+          <option value="providers" selected>Provider</option>
+          <option value="consumers">Consumer</option>
+        </select>
+        <label>Capability profile</label>
+        <select id="caps-dialog-profile" required></select>
+        <label>Capability version</label>
+        <select id="caps-dialog-version" required></select>
+        <label>Capability scope</label>
+        <input id="caps-dialog-scope" type="text" maxlength="128" placeholder=""/>
+        <button id="caps-dialog-ok" primary raised>Add</button>
+        <button id="caps-dialog-cancel" raised>Cancel</button>
+      </form>
+    </dialog>
+    <dialog id="watcher-dialog" closeby="none">
+      <h1>Add Watcher<button id="watcher-dialog-close" icon primary><i>close</i></button></h1>
+      <form id="watcher-dialog-form">
+        <label>Watch property</label>
+        <select id="watcher-dialog-property" autofocus required></select>
+        <label>Watch display</label>
+        <select id="watcher-dialog-display" required>
+          <option value="value" selected>Value</option>
+          <option value="text">Text</option>
+        </select>
+        <button id="watcher-dialog-ok" primary raised>Add</button>
+        <button id="watcher-dialog-cancel" raised>Cancel</button>
+      </form>
+    </dialog>
+    <dialog id="keys-dialog" closeby="none">
+      <h1>Add Key<button id="keys-dialog-close" icon primary><i>close</i></button></h1>
+      <form id="keys-dialog-form">
+        <label>Key identifier</label>
+        <input id="keys-dialog-key" type="text" maxlength="128" pattern="[A-Za-z0-9\/\.]*" placeholder="cns/network/example" autofocus required/>
+        <label>Key value</label>
+        <input id="keys-dialog-value" type="text" maxlength="128" placeholder=""/>
+        <button id="keys-dialog-ok" primary raised>Add</button>
+        <button id="keys-dialog-cancel" raised>Cancel</button>
+      </form>
+    </dialog>
     <dialog id="confirm-dialog" closeby="none">
       <h1><span>Title</span><button id="confirm-dialog-close" icon primary><i>close</i></button></h1>
       <form id="confirm-dialog-form">
@@ -175,70 +247,7 @@
         <button id="confirm-dialog-cancel" raised autofocus>No</button>
       </form>
     </dialog>
-    <dialog id="profiles-dialog" closeby="none">
-      <h1>Add New Profile<button id="profiles-dialog-close" icon primary><i>close</i></button></h1>
-      <form id="profiles-dialog-form">
-        <label>Profile identifier</label>
-        <input id="profiles-dialog-profile" type="text" maxlength="128" pattern="^[a-z]([a-z0-9\.]*)" placeholder="example.profile.id" autofocus required/>
-        <button id="profiles-dialog-ok" primary raised>Add</button>
-        <button id="profiles-dialog-cancel" raised>Cancel</button>
-      </form>
-    </dialog>
-    <dialog id="versions-dialog" closeby="none">
-      <h1>Add New Version<button id="versions-dialog-close" icon primary><i>close</i></button></h1>
-      <form id="versions-dialog-form">
-        <label>Profile version</label>
-        <input id="versions-dialog-version" type="number" value="1" min="1" max="9" step="1" placeholder="" autofocus required/>
-        <button id="versions-dialog-ok" primary raised>Add</button>
-        <button id="versions-dialog-cancel" raised>Cancel</button>
-      </form>
-    </dialog>
-    <dialog id="properties-dialog" closeby="none">
-      <h1>Add New Property<button id="properties-dialog-close" icon primary><i>close</i></button></h1>
-      <form id="properties-dialog-form">
-        <label>Property identifier</label>
-        <input id="properties-dialog-property" type="text" maxlength="128" pattern="^[A-Za-z]([A-Za-z0-9]*)" placeholder="exapleId" autofocus required/>
-        <button id="properties-dialog-ok" primary raised>Add</button>
-        <button id="properties-dialog-cancel" raised>Cancel</button>
-      </form>
-    </dialog>
-    <dialog id="nodes-dialog" closeby="none">
-      <h1>Add New Node<button id="nodes-dialog-close" icon primary><i>close</i></button></h1>
-      <form id="nodes-dialog-form">
-        <label>Node identifier</label>
-        <input id="nodes-dialog-id" type="text" maxlength="128" pattern="^[A-Za-z]([A-Za-z0-9]*)" placeholder="leave blank for uuid" autofocus/>
-        <button id="nodes-dialog-ok" primary raised>Add</button>
-        <button id="nodes-dialog-cancel" raised>Cancel</button>
-      </form>
-    </dialog>
-    <dialog id="contexts-dialog" closeby="none">
-      <h1>Add New Context<button id="contexts-dialog-close" icon primary><i>close</i></button></h1>
-      <form id="contexts-dialog-form">
-        <label>Context identifier</label>
-        <input id="contexts-dialog-id" type="text" maxlength="128" pattern="^[A-Za-z]([A-Za-z0-9]*)" placeholder="leave blank for uuid" autofocus/>
-        <button id="contexts-dialog-ok" primary raised>Add</button>
-        <button id="contexts-dialog-cancel" raised>Cancel</button>
-      </form>
-    </dialog>
-    <dialog id="caps-dialog" closeby="none">
-      <h1>Add New Capability<button id="caps-dialog-close" icon primary><i>close</i></button></h1>
-      <form id="caps-dialog-form">
-        <label>Capability role</label>
-        <select id="caps-dialog-role" autofocus>
-          <option value="provider" selected>Provider</option>
-          <option value="consumer">Consumer</option>
-        </select>
-        <label>Capability profile</label>
-        <select id="caps-dialog-profile" required></select>
-        <label>Capability version</label>
-        <input id="caps-dialog-version" type="number" value="1" min="1" max="9" step="1" placeholder="" required/>
-        <label>Capability scope</label>
-        <input id="caps-dialog-scope" type="text" maxlength="128" placeholder=""/>
-        <button id="caps-dialog-ok" primary raised>Add</button>
-        <button id="caps-dialog-cancel" raised>Cancel</button>
-      </form>
-    </dialog>
-    <footer>Initializing...</footer>
+    <footer>Connecting...</footer>
   </main>
 </body>
 </html>

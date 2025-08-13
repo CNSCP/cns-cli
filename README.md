@@ -82,7 +82,7 @@ An optional `--` indicates the end of command line options.
 
 ##### Hashbang
 
-```
+``` sh
 #!/usr/bin/env cns
 ```
 
@@ -96,22 +96,18 @@ An optional `--` indicates the end of command line options.
 |---------------------------|----------------------------|----------------------------------|
 | [help](#help)             |                            | Output help information          |
 | [version](#version)       |                            | Output version information       |
-| [init](#init)             |                            | Initialize config file           |
-| [config](#config)         | [name] [value]             | Display or set config properties |
-| [output](#output)         | [name] [value]             | Display or set output properties |
-| [device](#device)         | [-n] [name]                | Display device properties        |
-| [status](#status)         | [name]                     | Display status properties        |
+| [status](#status)         | [name]                     | Output status properties         |
+| [output](#output)         | [name] [value]             | Configure output properties      |
 | [dashboard](#dashboard)   | [port]                     | Start CNS Dashboard service      |
+| [init](#init)             |                            | Initialize config file           |
 | [connect](#connect)       |                            | Connect to network               |
-| [users](#users)           |                            | Display network users            |
-| [roles](#roles)           |                            | Display user roles               |
+| [disconnect](#disconnect) |                            | Disconnect from network          |
 | [network](#network)       |                            | Configure network properties     |
-| [install](#install)       | url                        | Configure profile from url       |
-| [profiles](#profiles)     | [profile]                  | Configure profile properties     |
+| [profiles](#profiles)     | [-i] [profile]             | Configure profile properties     |
 | [nodes](#nodes)           | [node]                     | Configure node properties        |
 | [contexts](#contexts)     | [node] [context]           | Configure context properties     |
-| [provider](#provider)     | [node] [context] [profile] | Configure consumer properties    |
-| [consumer](#consumer)     | [node] [context] [profile] | Configure profile properties     |
+| [providers](#providers)   | [node] [context] [profile] | Configure provider properties    |
+| [consumers](#consumers)   | [node] [context] [profile] | Configure consumer properties    |
 | [map](#map)               |                            | Display network map              |
 | [find](#find)             | [filter]                   | Find matching keys               |
 | [pwd](#pwd)               |                            | Display current key path         |
@@ -121,16 +117,12 @@ An optional `--` indicates the end of command line options.
 | [put](#put)               | key value                  | Put key value                    |
 | [del](#del)               | key                        | Delete key entry                 |
 | [purge](#purge)           | prefix                     | Delete matching keys             |
-| [disconnect](#disconnect) |                            | Disconnect from network          |
 | [cls](#cls)               |                            | Clear the screen                 |
 | [echo](#echo)             | [-n] [string]              | Write to standard output         |
 | [ask](#ask)               | [prompt] [default]         | Read from standard input         |
-| [exec](#exec)             | file                       | Spawn process                    |
 | [curl](#curl)             | url [method] [value]       | Send http request to url         |
 | [wait](#wait)             | [period]                   | Wait for specified time period   |
-| [history](#history)       | [-c]                       | Display terminal history         |
-| [save](#save)             | file                       | Save history to script file      |
-| [load](#load)             | file                       | Load and execute script file     |
+| [run](#run)               | file                       | Run script file                  |
 | [exit](#exit)             | [code]                     | Exit the console with code       |
 | [quit](#quit)             |                            | Quit the console                 |
 
@@ -148,24 +140,20 @@ Documentation can be found at https://github.com/cnscp/cns-cli/
 version
 ```
 
-#### init
+#### status
 
 ```sh
-init
+status [name]
 ```
 
-#### config
-
-```sh
-config [name] [value]
-```
-
-| Name             | Description                      | Default                |
-|------------------|----------------------------------|------------------------|
-| host             | Network host URI                 | 127.0.0.1              |
-| port             | Network port                     | 2379                   |
-| username         | Network username                 |                        |
-| password         | Network password                 |                        |
+| Name             | Description                    | Example                  |
+|------------------|--------------------------------|--------------------------|
+| started          | ISO time of session start      | 2025-06-20T12:48:16.618Z |
+| reads            | Total session reads            | 0                        |
+| writes           | Total session writes           | 0                        |
+| updates          | Total session updates          | 0                        |
+| errors           | Total session errors           | 0                        |
+| connection       | Current connection state       | online                   |
 
 #### output
 
@@ -210,45 +198,16 @@ output [name] [value]
 | json             | Output as JSON                                            |
 | xml              | Output as XML                                             |
 
-#### device
-
-```sh
-device [-n] [name]
-```
-
-| Name             | Description                      | Example                |
-|------------------|----------------------------------|------------------------|
-| name             | Machine name                     | My-Device.local        |
-| address          | Network IP address               | 192.168.1.100          |
-| mask             | Network mask                     | 255.255.255.0          |
-| arch             | CPU architecture                 | arm64                  |
-| platform         | OS name                          | darwin                 |
-| release          | OS version                       | 20.6.0                 |
-| memory           | Total available memory           | 8 GB                   |
-| free             | Total free memory                | 100 MB                 |
-| process          | Memory available to this process | 50 MB                  |
-| heap             | Heap allocation size             | 40 MB                  |
-| used             | Heap currently used              | 30 MB                  |
-
-#### status
-
-```sh
-status [name]
-```
-
-| Name             | Description                    | Example                  |
-|------------------|--------------------------------|--------------------------|
-| started          | ISO time of session start      | 2025-06-20T12:48:16.618Z |
-| reads            | Total session reads            | 0                        |
-| writes           | Total session writes           | 0                        |
-| updates          | Total session updates          | 0                        |
-| errors           | Total session errors           | 0                        |
-| connection       | Current connection state       | online                   |
-
 #### dashboard
 
 ```sh
 dashboard [port]
+```
+
+#### init
+
+```sh
+init
 ```
 
 #### connect
@@ -257,16 +216,10 @@ dashboard [port]
 connect
 ```
 
-#### users
+#### disconnect
 
 ```sh
-users
-```
-
-#### roles
-
-```sh
-roles
+disconnect
 ```
 
 #### network
@@ -275,16 +228,10 @@ roles
 network
 ```
 
-#### install
-
-```sh
-install url
-```
-
 #### profiles
 
 ```sh
-profiles [profile]
+profiles [-i] [profile]
 ```
 
 #### nodes
@@ -299,16 +246,16 @@ nodes [node]
 contexts [node] [context]
 ```
 
-#### provider
+#### providers
 
 ```sh
-provider [node] [context] [profile]
+providers [node] [context] [profile]
 ```
 
-#### consumer
+#### consumers
 
 ```sh
-consumer [node] [context] [profile]
+consumers [node] [context] [profile]
 ```
 
 #### map
@@ -365,12 +312,6 @@ del key
 purge prefix
 ```
 
-#### disconnect
-
-```sh
-disconnect
-```
-
 #### cls
 
 ```sh
@@ -389,12 +330,6 @@ echo [-n] [string]
 ask [prompt] [default]
 ```
 
-#### exec
-
-```sh
-exec file
-```
-
 #### curl
 
 ```sh
@@ -407,22 +342,10 @@ curl url [method] [value]
 wait [period]
 ```
 
-#### history
+#### run
 
 ```sh
-history [-c]
-```
-
-#### save
-
-```sh
-save file
-```
-
-#### load
-
-```sh
-load file
+run file
 ```
 
 #### exit
@@ -439,14 +362,18 @@ quit
 
 ### Variables
 
-| Name             | Description                      | Example                |
-|------------------|----------------------------------|------------------------|
-| $new             | Generate a new short form UUID   | 7jb1cjnXdQ6GQyFLAAyNdJ |
-| $uuid            | Generate a new long form UUID    | 483c69e7-54aa-40a3-bbd0-59e35cc5f437 |
-| $rand            | Generate random number (0 - 99)  | 57                     |
-| $now             | Current ISO timestamp            | 2025-06-20T15:39:09.030Z |
-| $path            | Current key path                 | cns/network/nodes/node1 |
-| $ask             | Input from previous ask command  | My input               |
+| Name         | Description                      | Example                    |
+|--------------|----------------------------------|----------------------------|
+| $new         | Generate a new short form UUID   | 7jb1cjnXdQ6GQyFLAAyNdJ     |
+| $uuid        | Generate a new long form UUID    | 483c69e7-54aa-40a3-bbd0-59e35cc5f437 |
+| $rand        | Generate random number (0 - 99)  | 42                         |
+| $now         | Current ISO timestamp            | 2025-07-13T14:54:02.0Z     |
+| $date        | Current date                     | SUN 13 JUL 2025            |
+| $time        | Current time                     | 3:53 PM                    |
+| $path        | Current key path                 | cns/network/nodes/node1    |
+| $ask         | Input from previous ask command  | My input                   |
+
+environment, output, stats
 
 ## Maintainers
 
