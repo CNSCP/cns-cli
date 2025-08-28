@@ -197,8 +197,9 @@ const shortcuts = {
 // Local data
 
 var client;
-var watcher;
+
 var cache;
+var watcher;
 
 var variables;
 var descriptors;
@@ -1052,42 +1053,42 @@ async function connect() {
       throw new Error(E_WATCH + ': ' + e.message);
     });
 
-  watcher
-    .on('connected', () => {
-      // Re-connect
-      debug('Connected...');
-    })
-    .on('put', (change) => {
-      // Key put
-      const key = change.key.toString();
-      const value = change.value.toString();
+  // Bind handlers
+  watcher.on('connected', () => {
+    // Re-connect
+    debug('Connected...');
+  })
+  .on('put', (change) => {
+    // Key put
+    const key = change.key.toString();
+    const value = change.value.toString();
 
-      debug('PUT ' + key + ' = ' + value);
-      cache[key] = value;
+    debug('PUT ' + key + ' = ' + value);
+    cache[key] = value;
 
-      update(key, value);
-    })
-    .on('delete', (change) => {
-      // Key deleted
-      const key = change.key.toString();
-      const value = change.value.toString();
+    update(key, value);
+  })
+  .on('delete', (change) => {
+    // Key deleted
+    const key = change.key.toString();
+    const value = change.value.toString();
 
-      debug('DEL ' + key);
-      delete cache[key];
+    debug('DEL ' + key);
+    delete cache[key];
 
-      update(key, null);
-    })
-    .on('disconnected', () => {
-      // Broken connection
-      debug('Disconnected...');
-    })
-    .on('error', (e) => {
-      // Failure
-      throw new Error(E_WATCH + ': ' + e.message);
-    });
+    update(key, null);
+  })
+  .on('disconnected', () => {
+    // Broken connection
+    debug('Disconnected...');
+  })
+  .on('error', (e) => {
+    // Failure
+    throw new Error(E_WATCH + ': ' + e.message);
+  });
 
   // Success
-  debug('Network on ' + host + (username?(' as ' + username):''));
+  print('Network on ' + (username?(username + '@'):'') + host);
   stats.connection = S_ONLINE;
 
   broadcast({
