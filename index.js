@@ -875,7 +875,7 @@ function help() {
   print('  disconnect                               Disconnect from network');
   print('  network                                  Configure network properties');
   print('  profiles [-i] [profile]                  Configure profile properties');
-  print('  nodes [systemID] [node]                  Configure node properties');
+  print('  nodes [node]                             Configure node properties');
   print('  contexts [node] [context]                Configure context properties');
   print('  providers [node] [context] [profile]     Configure provider properties');
   print('  consumers [node] [context] [profile]     Configure consumer properties');
