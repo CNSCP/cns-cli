@@ -787,7 +787,7 @@ function wildcard(loc) {
 
   const parts = loc.split('/');
 
-  if (parts[0] === 'cns' && parts[1] === 'network')
+  if (parts[0] === 'cns')// && parts[1] === 'network')
     absolute = true;
 
   // Relative path?
@@ -875,7 +875,7 @@ function help() {
   print('  disconnect                               Disconnect from network');
   print('  network                                  Configure network properties');
   print('  profiles [-i] [profile]                  Configure profile properties');
-  print('  nodes [node]                             Configure node properties');
+  print('  nodes [systemID] [node]                  Configure node properties');
   print('  contexts [node] [context]                Configure context properties');
   print('  providers [node] [context] [profile]     Configure provider properties');
   print('  consumers [node] [context] [profile]     Configure consumer properties');
@@ -1271,6 +1271,7 @@ async function nodes(arg1, arg2, arg3, arg4) {
   if (client === undefined)
     throw new Error(E_CONNECT);
 
+  var network = 'network';
   var node = argument(arg1);
   var name = argument(arg2, 'New Node');
   var upstream = argument(arg3, 'no');
@@ -1282,8 +1283,6 @@ async function nodes(arg1, arg2, arg3, arg4) {
     return;
   }
 
-  const ns = 'cns/network/nodes/' + node + '/';
-
   // Edit in console?
   if (pipe === undefined) {
     // Output help
@@ -1292,12 +1291,16 @@ async function nodes(arg1, arg2, arg3, arg4) {
 
     print('Press ^C at any time to quit.\n');
 
+    const ns = 'cns/network/nodes/' + node + '/';
+
     // Ask questions
     const answers = await questions([
+        'SystemID',
         'Node Name',
         'Node Upstream',
         'Node Token'
       ], [
+        '',
         cache[ns + 'name'] || name,
         cache[ns + 'upstream'] || upstream,
         cache[ns + 'token'] || token
@@ -1306,17 +1309,20 @@ async function nodes(arg1, arg2, arg3, arg4) {
     // Prompt to write
     print('\nAbout to publish properties:\n');
 
-    print('name = ' + answers[0]);
-    print('upstream = ' + answers[1]);
-    print('token = ' + answers[2]);
+    print('name = ' + answers[1]);
+    print('upstream = ' + answers[2]);
+    print('token = ' + answers[3]);
 
     await confirmation();
 
     // Update new values
-    name = answers[0];
-    upstream = answers[1];
-    token = answers[2];
+    network = answers[0];
+    name = answers[1];
+    upstream = answers[2];
+    token = answers[3];
   }
+
+  const ns = 'cns/' + network + '/nodes/' + node + '/';
 
   // Update new values
   await put(ns + 'name', name);
