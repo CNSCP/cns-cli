@@ -1,7 +1,6 @@
 // main.js - CNS Dashboard
 // Copyright 2025 Padi, Inc. All Rights Reserved.
 
-// user login
 // add hilight attribute on change
 // open if name = new something (also stick at top)
 // do some help
@@ -46,11 +45,12 @@ const MAX_MESSAGES = 32;
 
 var client;
 
-var descriptors;
+//var descriptors;
 var messages;
 var expanded;
 
 var dialog;
+var syscrap;
 
 // Event handlers
 
@@ -75,7 +75,7 @@ function oninit() {
     hidden('#connected', false);
 
     // Fetch profile descriptors
-    getDescriptors();
+//    getDescriptors();
   })
   // Client update
   .on('update', (data) => {
@@ -101,6 +101,8 @@ function oninit() {
     // Failure
     message(ERROR, e.message);
     text('footer', 'Error: ' + e.message);
+
+    console.error(e);
   });
 }
 
@@ -120,13 +122,9 @@ function onkeyup(e) {
 
   // Key where?
   switch (id) {
-    case 'profiles-search':
-      // Search profiles
-      html('#profiles-list', listProfiles());
-      break;
-    case 'nodes-search':
+    case 'systems-search':
       // Search nodes
-      html('#nodes-list', listNodes());
+      html('#systems-list', listSystems());
       break;
     case 'keys-search':
       // Search keys
@@ -178,9 +176,7 @@ function onclick(e) {
       compact(toggle('nav', 'list', 'collapse', 'expand'));
       break;
     case 'overview':
-    case 'network':
-    case 'profiles':
-    case 'nodes':
+    case 'systems':
     case 'keys':
     case 'console':
     case 'about':
@@ -199,14 +195,19 @@ function onclick(e) {
       // Message list
       message();
       break;
-    case 'profiles-link':
-      // View profile
-      window.open(key);
-      break;
-    case 'profiles-install':
-    case 'profiles-remove':
-      // Profiles list
-      install(element, key, val);
+//    case 'profiles-link':
+//      // View profile
+//      window.open(key);
+//      break;
+//    case 'profiles-install':
+//    case 'profiles-remove':
+//      // Profiles list
+//      install(element, key, val);
+//      break;
+    case 'systems-add':
+    case 'systems-remove':
+      // Systems list
+      systems(element, key, val);
       break;
     case 'nodes-add':
     case 'nodes-remove':
@@ -254,8 +255,8 @@ function onchange(e) {
 
   // Changed what?
   switch (id) {
-    case 'network-name':
-    case 'network-orchestrator':
+    case 'system-name':
+    case 'system-orchestrator':
     case 'node-name':
     case 'node-upstream':
     case 'context-name':
@@ -270,7 +271,8 @@ function onchange(e) {
       break;
     case 'caps-dialog-profile':
       // Caps profile change
-      html('#caps-dialog-version', selectVersions(value('#caps-dialog-version'), val));
+      const versions = selectVersions(syscrap, value('#caps-dialog-version'), val);
+      html('#caps-dialog-version', versions);
       break;
   }
 }
@@ -285,13 +287,13 @@ function onsubmit(e) {
 
   // Submit what?
   switch (id) {
-    case 'profiles-form':
-      // Profiles search
-      focus('#profiles-search');
-      break;
-    case 'nodes-form':
-      // Nodes search
-      focus('#nodes-search');
+//    case 'profiles-form':
+//      // Profiles search
+//      focus('#profiles-search');
+//      break;
+    case 'systems-form':
+      // Systems search
+      focus('#systems-search');
       break;
     case 'keys-form':
       // Keys search
@@ -443,10 +445,7 @@ function update(data) {
     const updates = sanitize(stats.updates);
     const errors = sanitize(stats.errors);
 
-    const key = 'cns/network/name';
-
-    const network = sanitize(client.get(key));
-    const connection = isOnline?('<span data-key="' + key + '">' + network + '</span>'):'<span error>Offline</span>';
+    const connection = isOnline?('<span>Online</span>'):'<span error>Offline</span>';
 
     const list =
       '<table>' +
@@ -484,7 +483,6 @@ function update(data) {
     var list1 = '';
     var list2 = '';
     var list3 = '';
-    var list4 = '';
 
     if (isOnline) {
       // Needs to rebuild?
@@ -500,7 +498,7 @@ function update(data) {
         }
 
         // Capability version change?
-        if (key.startsWith('cns/network/nodes/') && key.endsWith('/version')) {
+        if (/*key.startsWith('cns/network/nodes/') &&*/ key.endsWith('/version')) {
           rebuild = true;
 //          break;
         }
@@ -534,9 +532,8 @@ function update(data) {
       if (!rebuild) return;
 
       list1 = listWatchers();
-      list2 = listProfiles();
-      list3 = listNodes();
-      list4 = listKeys();
+      list2 = listSystems();
+      list3 = listKeys();
     }
 
     // Keep focused element
@@ -547,9 +544,8 @@ function update(data) {
 
     // Update lists
     html('#watchers-list', list1);
-    html('#profiles-list', list2);
-    html('#nodes-list', list3);
-    html('#keys-list', list4);
+    html('#systems-list', list2);
+    html('#keys-list', list3);
 
     // Re-focus
     if (focused) focus(focused);
@@ -561,12 +557,13 @@ function listWatchers() {
   var list = '';
   var total = 0;
 
-  const watchers = client.select('cns/network/nodes/*/contexts/*/consumer/*/watch');
+  const watchers = client.select('cns/*/nodes/*/contexts/*/consumer/*/watch');
   const order = Object.keys(watchers).sort();
 
   for (const watcher of order) {
     const parts = watcher.split('/');
 
+    const system = parts[1];
     const node = parts[3];
     const context = parts[5];
     const profile = parts[7];
@@ -574,7 +571,7 @@ function listWatchers() {
     const watch = watchers[watcher];
     const from = watcher.replace('/watch', '');
 
-    const ns = 'cns/network/nodes/' + node + '/contexts/' + context;
+    const ns = 'cns/' + system + '/nodes/' + node + '/contexts/' + context;
     const cs = ns + '/consumer/' + profile;
 
     const options = watch.split(':');
@@ -599,7 +596,6 @@ function listWatchers() {
       const key = parts.join('/');
       const ps = conns[conn];
 
-      const provider = client.get(ps + '/name', parts[5]);
       const value = client.get(key, property);
 
       list +=
@@ -607,7 +603,7 @@ function listWatchers() {
           '<button id="watchers-remove" data-key="' + cs + '" data-val="off" icon primary><i>clear</i></button>' +
           '<h1 data-key="' + ns + '/name">' + consumer + '</h1>' +
           '<p data-key="' + key + '">' + value + '</p>' +
-          '<h2 data-key="' + ps + '/name">' + provider + '</h2>' +
+          '<h2 data-key="' + ps + '/name">' + property + '</h2>' +
           '<h2>' + profile + '</h2>' +
         '</dd>';
     }
@@ -673,6 +669,7 @@ function listMessages() {
   return list;
 }
 
+/*
 // Generate profiles list
 function listProfiles() {
   const ns = 'cns/network/profiles/';
@@ -699,9 +696,9 @@ function listProfiles() {
     }
   }
 
-  // Add installed profiles
-  const installed = client.select(ns + '*/name');
-
+  // Add installed profiles*/
+//  const installed = client.select(ns + '*/name');
+/*
   for (const profile in installed) {
     const parts = profile.split('/');
 
@@ -768,16 +765,17 @@ function listProfiles() {
       caption +
     '</table>';
 }
-
+*/
+/*
 // Generate profile versions
 function listVersions(profile) {
   const ns = 'cns/network/profiles/' + profile + '/versions/';
 
   var list = '';
   var total = 0;
-
-  const versions = client.select(ns + '*/name');
-  const order = Object.keys(versions).sort();
+*/
+//  const versions = client.select(ns + '*/name');
+/*  const order = Object.keys(versions).sort();
 
   for (const version of order) {
     const parts = version.split('/');
@@ -816,16 +814,18 @@ function listVersions(profile) {
       caption +
     '</table>';
 }
+*/
 
+/*
 // Generate profile properties
 function listProperties(profile, version) {
   const ns = 'cns/network/profiles/' + profile + '/versions/' + version + '/properties/';
 
   var list = '';
   var total = 0;
-
-  const properties = client.select(ns + '*/name');
-  const order = Object.keys(properties).sort();
+*/
+//  const properties = client.select(ns + '*/name');
+/*  const order = Object.keys(properties).sort();
 
   for (const property of order) {
     const parts = property.split('/');
@@ -868,17 +868,89 @@ function listProperties(profile, version) {
       list +
       caption +
     '</table>';
-}
+}*/
 
-// Generate nodes list
-function listNodes() {
-  const ns = 'cns/network/nodes/';
+// Generate systems list
+function listSystems() {
+  const ns = 'cns/';
 
   var list = '';
   var total = 0;
 
-  const search = value('#nodes-search');
+  const search = value('#systems-search');
   const wildcard = '*' + search + '*';
+
+  const systems = client.select(ns + '*/name');
+  const order = Object.keys(systems).sort();
+
+  for (const system of order) {
+    const parts = system.split('/');
+
+    const id = parts[1];
+    const name = systems[system];
+
+    if (match(id, wildcard) || match(name, wildcard)) {
+      const key = ns + id;
+
+      const expand = '<button id="systems-expand" data-key="' + key + '" icon primary><i>' + isExpanded(key) + '</i></button>';
+      const action = '<button id="systems-remove" data-key="' + key + '" data-val="' + id + '" data-tip="Remove System" data-pos="left" icon primary><i>delete</i></button>';
+
+      const orchestrator = client.get(key + '/orchestrator', 'none');
+      const token = client.get(key + '/token', '');
+
+      list +=
+        '<tr>' +
+          '<td>' + expand + '</td>' +
+          '<td>' + id + '</td>' +
+          '<td data-key="' + key + '/name">' + name + '</td>' +
+          '<td data-key="' + key + '/orchestrator" align="center">' + orchestrator + '</td>' +
+          '<td>' + action + '</td>' +
+        '</tr>' +
+        '<tr expand' + isHidden(key) + '>' +
+          '<td></td>' +
+          '<td colspan="4">' +
+            '<form id="system-form">' +
+              '<label>System name</label>' +
+              '<input id="system-name" type="text" value="' + name + '" maxlength="128" data-key="' + key + '/name" placeholder="New System"/>' +
+              '<label>System orchestrator</label>' +
+              '<select id="system-orchestrator" data-key="' + key + '/orchestrator">' +
+                '<option value="none"' + isSelected(orchestrator, 'none') + '>None</option>' +
+                '<option value="allsystems"' + isSelected(orchestrator, 'allsystems') + '>All Systems</option>' +
+                '<option value="bysystem"' + isSelected(orchestrator, 'bysystem') + '>By System</option>' +
+              '</select>' +
+              '<label>System token</label>' +
+              '<input id="system-token" type="text" value="' + token + '" maxlength="128" data-key="' + key + '/token" placeholder="" readonly/>' +
+            '</form>' +
+            listNodes(id) +
+          '</td>' +
+        '</tr>';
+
+      total++;
+    }
+  }
+
+  const add = '<button id="systems-add" data-tip="Add System" data-pos="left" icon primary><i>add</i></button>';
+  const caption = '<caption>' + pluralize(total, 'System', 'Systems') + ' found</caption>';
+
+  return '<table>' +
+      '<tr>' +
+        '<th><i>hive</i></th>' +
+        '<th>System</th>' +
+        '<th>Name</th>' +
+        '<th>Orchestrator</th>' +
+        '<th>' + add + '</th>' +
+      '</tr>' +
+      list +
+      caption +
+    '</table>';
+}
+
+// Generate nodes list
+function listNodes(system) {
+  const ns = 'cns/' + system + '/nodes/';
+
+  var list = '';
+  var total = 0;
 
   const nodes = client.select(ns + '*/name');
   const order = Object.keys(nodes).sort();
@@ -889,46 +961,44 @@ function listNodes() {
     const id = parts[3];
     const name = nodes[node];
 
-    if (match(id, wildcard) || match(name, wildcard)) {
-      const key = ns + id;
+    const key = ns + id;
 
-      const expand = '<button id="nodes-expand" data-key="' + key + '" icon primary><i>' + isExpanded(key) + '</i></button>';
-      const action = '<button id="nodes-remove" data-key="' + key + '" data-val="' + id + '" data-tip="Remove Node" data-pos="left" icon primary><i>delete</i></button>';
+    const expand = '<button id="nodes-expand" data-key="' + key + '" icon primary><i>' + isExpanded(key) + '</i></button>';
+    const action = '<button id="nodes-remove" data-key="' + key + '" data-val="' + id + '" data-tip="Remove Node" data-pos="left" icon primary><i>delete</i></button>';
 
-      const upstream = client.get(key + '/upstream', 'no');
-      const token = client.get(key + '/token', '');
+    const upstream = client.get(key + '/upstream', 'no');
+    const token = client.get(key + '/token', '');
 
-      list +=
-        '<tr>' +
-          '<td>' + expand + '</td>' +
-          '<td>' + id + '</td>' +
-          '<td data-key="' + key + '/name">' + name + '</td>' +
-          '<td data-key="' + key + '/upstream" align="center" capitalize>' + upstream + '</td>' +
-          '<td>' + action + '</td>' +
-        '</tr>' +
-        '<tr expand' + isHidden(key) + '>' +
-          '<td></td>' +
-          '<td colspan="4">' +
-            '<form id="node-form">' +
-              '<label>Node name</label>' +
-              '<input id="node-name" type="text" value="' + name + '" maxlength="128" data-key="' + key + '/name" placeholder="New Node"/>' +
-              '<label>Node upstream</label>' +
-              '<select id="node-upstream" data-key="' + key + '/upstream">' +
-                '<option value="yes"' + isSelected(upstream, 'yes') + '>Yes</option>' +
-                '<option value="no"' + isSelected(upstream, 'no') + '>No</option>' +
-              '</select>' +
-              '<label>Node token</label>' +
-              '<input id="node-token" type="text" value="' + token + '" maxlength="128" data-key="' + key + '/token" placeholder="" readonly/>' +
-            '</form>' +
-            listContexts(id) +
-          '</td>' +
-        '</tr>';
+    list +=
+      '<tr>' +
+        '<td>' + expand + '</td>' +
+        '<td>' + id + '</td>' +
+        '<td data-key="' + key + '/name">' + name + '</td>' +
+        '<td data-key="' + key + '/upstream" align="center" capitalize>' + upstream + '</td>' +
+        '<td>' + action + '</td>' +
+      '</tr>' +
+      '<tr expand' + isHidden(key) + '>' +
+        '<td></td>' +
+        '<td colspan="4">' +
+          '<form id="node-form">' +
+            '<label>Node name</label>' +
+            '<input id="node-name" type="text" value="' + name + '" maxlength="128" data-key="' + key + '/name" placeholder="New Node"/>' +
+            '<label>Node upstream</label>' +
+            '<select id="node-upstream" data-key="' + key + '/upstream">' +
+              '<option value="yes"' + isSelected(upstream, 'yes') + '>Yes</option>' +
+              '<option value="no"' + isSelected(upstream, 'no') + '>No</option>' +
+            '</select>' +
+            '<label>Node token</label>' +
+            '<input id="node-token" type="text" value="' + token + '" maxlength="128" data-key="' + key + '/token" placeholder="" readonly/>' +
+          '</form>' +
+          listContexts(system, id) +
+        '</td>' +
+      '</tr>';
 
-      total++;
-    }
+    total++;
   }
 
-  const add = '<button id="nodes-add" data-tip="Add Node" data-pos="left" icon primary><i>add</i></button>';
+  const add = '<button id="nodes-add" data-val="' + system + '" data-tip="Add Node" data-pos="left" icon primary><i>add</i></button>';
   const caption = '<caption>' + pluralize(total, 'Node', 'Nodes') + ' found</caption>';
 
   return '<table>' +
@@ -945,8 +1015,8 @@ function listNodes() {
 }
 
 // Generate contexts list
-function listContexts(node) {
-  const ns = 'cns/network/nodes/' + node + '/contexts/';
+function listContexts(system, node) {
+  const ns = 'cns/' + system + '/nodes/' + node + '/contexts/';
 
   var list = '';
   var total = 0;
@@ -983,14 +1053,14 @@ function listContexts(node) {
             '<label>Context token</label>' +
             '<input id="context-token" type="text" value="' + token + '" maxlength="128" data-key="' + key + '/token" placeholder="" readonly/>' +
           '</form>' +
-          listCaps(node, id) +
+          listCaps(system, node, id) +
         '</td>' +
       '</tr>';
 
     total++;
   }
 
-  const add = '<button id="contexts-add" data-val="' + node + '" data-tip="Add Context" data-pos="left" icon primary><i>add</i></button>';
+  const add = '<button id="contexts-add" data-val="' + system + ':' + node + '" data-tip="Add Context" data-pos="left" icon primary><i>add</i></button>';
   const caption = '<caption>' + pluralize(total, 'Context', 'Contexts') + ' found</caption>';
 
   return '<table>' +
@@ -1006,8 +1076,8 @@ function listContexts(node) {
 }
 
 // Generate capability list
-function listCaps(node, context) {
-  const ns = 'cns/network/nodes/' + node + '/contexts/' + context + '/';
+function listCaps(system, node, context) {
+  const ns = 'cns/' + system + '/nodes/' + node + '/contexts/' + context + '/';
 
   var list = '';
   var total = 0;
@@ -1043,20 +1113,20 @@ function listCaps(node, context) {
           '<form id="cap-form">' +
             '<label>Capability version</label>' +
             '<select id="cap-version" value="' + version + '" data-key="' + key + '/version">' +
-              selectVersions(version, id) +
+              selectVersions(system, version, id) +
             '</select>' +
             '<label>Capability scope</label>' +
             '<input id="cap-scope" type="text" value="' + scope + '" maxlength="128" data-key="' + key + '/scope" placeholder=""/>' +
-            formDefaults(node, context, role, id, version) +
+            formDefaults(system, node, context, role, id, version) +
           '</form>' +
-          listConns(node, context, role, id, version) +
+          listConns(system, node, context, role, id, version) +
         '</td>' +
       '</tr>';
 
     total++;
   }
 
-  const add = '<button id="caps-add" data-val="' + node + ':' + context + '" data-tip="Add Capability" data-pos="left" icon primary><i>add</i></button>';
+  const add = '<button id="caps-add" data-val="' + system + ':' + node + ':' + context + '" data-tip="Add Capability" data-pos="left" icon primary><i>add</i></button>';
   const caption = '<caption>' + pluralize(total, 'Capability', 'Capabilities') + ' found</caption>';
 
   return '<table>' +
@@ -1074,8 +1144,8 @@ function listCaps(node, context) {
 }
 
 // Generate connections list
-function listConns(node, context, role, profile, version) {
-  const ps = 'cns/network/nodes/' + node + '/contexts/' + context + '/' + role + '/' + profile;
+function listConns(system, node, context, role, profile, version) {
+  const ps = 'cns/' + system + '/nodes/' + node + '/contexts/' + context + '/' + role + '/' + profile;
   const ns = ps + '/connections/';
 
   var list = '';
@@ -1096,7 +1166,7 @@ function listConns(node, context, role, profile, version) {
     const otherContext = otherParts[5] || '';
 
     const key = ns + id;
-    const otherKey = 'cns/network/nodes/' + otherNode + '/contexts/' + otherContext;
+    const otherKey = 'cns/' + system + '/nodes/' + otherNode + '/contexts/' + otherContext;
 
     const expand = '<button id="conns-expand" data-key="' + key + '" icon primary><i>' + isExpanded(key) + '</i></button>';
 
@@ -1110,7 +1180,7 @@ function listConns(node, context, role, profile, version) {
         '<td></td>' +
       '</tr>' +
       '<tr expand' + isHidden(key) + '>' +
-        formProperties(node, context, role, profile, version, id) +
+        formProperties(system, node, context, role, profile, version, id) +
       '</tr>';
 
     total++;
@@ -1157,8 +1227,6 @@ function listKeys() {
   const order = Object.keys(keys).sort();
 
   for (const key of order) {
-    if (key.startsWith('cns/network/profiles/')) continue;
-
     const parts = key.split('/');
     const value = keys[key];
 
@@ -1193,7 +1261,7 @@ function listKeys() {
 
   return '<table>' +
       '<tr>' +
-        '<th><i>dns</i></th>' +
+        '<th><i>storage</i></th>' +
         '<th>Key</th>' +
         '<th>' + add + '</th>' +
       '</tr>' +
@@ -1203,9 +1271,9 @@ function listKeys() {
 }
 
 // Generate defaults form
-function formDefaults(node, context, role, profile, version) {
-  const ns = 'cns/network/nodes/' + node + '/contexts/' + context + '/' + role + '/' + profile + '/properties/';
-  const ps = 'cns/network/profiles/' + profile + '/versions/version' + version + '/properties/';
+function formDefaults(system, node, context, role, profile, version) {
+  const ns = 'cns/' + system + '/nodes/' + node + '/contexts/' + context + '/' + role + '/' + profile + '/properties/';
+  const ps = 'cns/' + system + '/profiles/' + profile + '/versions/version' + version + '/properties/';
 
   var form = '';
 
@@ -1236,9 +1304,9 @@ function formDefaults(node, context, role, profile, version) {
 }
 // combine these two
 // Generate properties form
-function formProperties(node, context, role, profile, version, conn) {
-  const ns = 'cns/network/nodes/' + node + '/contexts/' + context + '/' + role + '/' + profile + '/connections/' + conn + '/properties/';
-  const ps = 'cns/network/profiles/' + profile + '/versions/version' + version + '/properties/';
+function formProperties(system, node, context, role, profile, version, conn) {
+  const ns = 'cns/' + system + '/nodes/' + node + '/contexts/' + context + '/' + role + '/' + profile + '/connections/' + conn + '/properties/';
+  const ps = 'cns/' + system + '/profiles/' + profile + '/versions/version' + version + '/properties/';
 
   var form = '';
 
@@ -1280,10 +1348,10 @@ function formProperties(node, context, role, profile, version, conn) {
 }
 
 // Set profile select items
-function selectProfiles(current) {
+function selectProfiles(system, current) {
   var options = '';
 
-  const profiles = client.select('cns/network/profiles/*/name');
+  const profiles = client.select('cns/' + system + '/profiles/*/name');
   const order = Object.keys(profiles).sort();
 
   for (const profile of order) {
@@ -1297,10 +1365,10 @@ function selectProfiles(current) {
 }
 
 // Set version select items
-function selectVersions(current, profile) {
+function selectVersions(system, current, profile) {
   var options = '';
 
-  const versions = client.select('cns/network/profiles/' + profile + '/versions/*/name');
+  const versions = client.select('cns/' + system + '/profiles/' + profile + '/versions/*/name');
   const order = Object.keys(versions).sort();
 
   for (const version of order) {
@@ -1317,12 +1385,13 @@ function selectVersions(current, profile) {
 function selectProperties(current, key) {
   const parts = key.split('/');
 
+  const system = parts[1];
   const profile = parts[7];
   const version = client.get(key + '/version');
 
   var options = '';
 
-  const properties = client.select('cns/network/profiles/' + profile + '/versions/version' + version + '/properties/*/name');
+  const properties = client.select('cns/' + system + '/profiles/' + profile + '/versions/version' + version + '/properties/*/name');
   const order = Object.keys(properties).sort();
 
   for (const property of order) {
@@ -1335,6 +1404,7 @@ function selectProperties(current, key) {
   return options;
 }
 
+/*
 // Show install dialog
 function install(element, key, val) {
   // Remove profile
@@ -1350,11 +1420,32 @@ function install(element, key, val) {
     }
   });
 }
+*/
+
+// Show systems dialog
+function systems(element, key, val) {
+  // Remove system
+  if (key) return purge(element, 'System', key, val);
+
+  // Show dialog
+  return show('#systems-dialog')
+  .then((result) => {
+    // Confirmed?
+    if (result) {
+      const id = value('#systems-dialog-id') || '$new';
+      return command('systems', id);
+    }
+  });
+}
 
 // Show nodes dialog
 function nodes(element, key, val) {
   // Remove node
   if (key) return purge(element, 'Node', key, val);
+
+  // Split context
+  const parts = val.split(':');
+  const system = parts[0];
 
   // Show dialog
   return show('#nodes-dialog')
@@ -1362,7 +1453,7 @@ function nodes(element, key, val) {
     // Confirmed?
     if (result) {
       const id = value('#nodes-dialog-id') || '$new';
-      return command('nodes', id);
+      return command('nodes', system, id);
     }
   });
 }
@@ -1372,13 +1463,19 @@ function contexts(element, key, val) {
   // Remove context
   if (key) return purge(element, 'Context', key, val);
 
+  // Split context
+  const parts = val.split(':');
+
+  const system = parts[0];
+  const node = parts[1];
+
   // Show dialog
   return show('#contexts-dialog')
   .then((result) => {
     // Confirmed?
     if (result) {
       const id = value('#contexts-dialog-id') || '$new';
-      return command('contexts', val, id);
+      return command('contexts', system, node, id);
     }
   });
 }
@@ -1388,26 +1485,30 @@ function capability(element, key, val) {
   // Remove capability
   if (key) return purge(element, 'Capability', key, val);
 
+  // Split context
+  const parts = val.split(':');
+
+  const system = parts[0];
+  const node = parts[1];
+  const context = parts[2];
+
+  syscrap = system;
+
   // Fill profiles list
-  html('#caps-dialog-profile', selectProfiles(value('#caps-dialog-profile')));
-  html('#caps-dialog-version', selectVersions(value('#caps-dialog-version'), value('#caps-dialog-profile')));
+  html('#caps-dialog-profile', selectProfiles(system, value('#caps-dialog-profile')));
+  html('#caps-dialog-version', selectVersions(system, value('#caps-dialog-version'), value('#caps-dialog-profile')));
 
   // Show dialog
   return show('#caps-dialog')
   .then((result) => {
     // Confirmed?
     if (result) {
-      const parts = val.split(':');
-
-      const node = parts[0];
-      const context = parts[1];
-
       const role = value('#caps-dialog-role');
       const profile = value('#caps-dialog-profile');
       const version = value('#caps-dialog-version');
       const scope = value('#caps-dialog-scope');
 
-      return command(role, node, context, profile, version, scope);
+      return command(role, system, node, context, profile, version, scope);
     }
   });
 }
@@ -1562,7 +1663,7 @@ async function command(cmd, ...args) {
 }
 
 // Get profile descriptors
-async function getDescriptors() {
+/*async function getDescriptors() {
   // Already fetched?
   if (descriptors !== undefined) return;
 
@@ -1572,7 +1673,7 @@ async function getDescriptors() {
   descriptors = response.descriptors;
 
   html('#profiles-list', listProfiles());
-}
+}*/
 
 // String functions
 

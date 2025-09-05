@@ -92,39 +92,40 @@ An optional `--` indicates the end of command line options.
 
 ### Command List
 
-| Command                   | Arguments                  | Description                      |
-|---------------------------|----------------------------|----------------------------------|
-| [help](#help)             |                            | Output help information          |
-| [version](#version)       |                            | Output version information       |
-| [status](#status)         | [name]                     | Output status properties         |
-| [output](#output)         | [name] [value]             | Configure output properties      |
-| [dashboard](#dashboard)   | [port]                     | Start CNS Dashboard service      |
-| [init](#init)             |                            | Initialize config file           |
-| [connect](#connect)       |                            | Connect to network               |
-| [disconnect](#disconnect) |                            | Disconnect from network          |
-| [network](#network)       |                            | Configure network properties     |
-| [profiles](#profiles)     | [-i] [profile]             | Configure profile properties     |
-| [nodes](#nodes)           | [node]                     | Configure node properties        |
-| [contexts](#contexts)     | [node] [context]           | Configure context properties     |
-| [providers](#providers)   | [node] [context] [profile] | Configure provider properties    |
-| [consumers](#consumers)   | [node] [context] [profile] | Configure consumer properties    |
-| [map](#map)               |                            | Display network map              |
-| [find](#find)             | [filter]                   | Find matching keys               |
-| [pwd](#pwd)               |                            | Display current key path         |
-| [cd](#cd)                 | [key]                      | Change current key path          |
-| [ls](#ls)                 | [-l] [key]                 | List key values                  |
-| [get](#get)               | key                        | Get key value                    |
-| [put](#put)               | key value                  | Put key value                    |
-| [del](#del)               | key                        | Delete key entry                 |
-| [purge](#purge)           | prefix                     | Delete matching keys             |
-| [cls](#cls)               |                            | Clear the screen                 |
-| [echo](#echo)             | [-n] [string]              | Write to standard output         |
-| [ask](#ask)               | [prompt] [default]         | Read from standard input         |
-| [curl](#curl)             | url [method] [value]       | Send http request to url         |
-| [wait](#wait)             | [period]                   | Wait for specified time period   |
-| [run](#run)               | file                       | Run script file                  |
-| [exit](#exit)             | [code]                     | Exit the console with code       |
-| [quit](#quit)             |                            | Quit the console                 |
+| Command                     | Arguments                   | Description                      |
+|-----------------------------|-----------------------------|----------------------------------|
+| [help](#help)               |                             | Output help information          |
+| [version](#version)         |                             | Output version information       |
+| [status](#status)           | [name]                      | Output status properties         |
+| [output](#output)           | [name] [value]              | Configure output properties      |
+| [dashboard](#dashboard)     | [port]                      | Start CNS Dashboard service      |
+| [init](#init)               |                             | Initialize config file           |
+| [connect](#connect)         |                             | Connect to network               |
+| [disconnect](#disconnect)   |                             | Disconnect from network          |
+| [system](#system)           | [system]                    | Configure system properties      |
+| [profiles](#profiles)       | system [-i] [profile] [ver] | Configure profile properties     |
+| [nodes](#nodes)             | system [node]               | Configure node properties        |
+| [contexts](#contexts)       | system node [context]       | Configure context properties     |
+| [providers](#providers)     | system node context profile | Configure provider properties    |
+| [consumers](#consumers)     | system node context profile | Configure consumer properties    |
+| [connections](#connections) | [system] [node] [context]   | Display profile connections      |
+| [map](#map)                 |                             | Display network map              |
+| [find](#find)               | [filter]                    | Find matching keys               |
+| [pwd](#pwd)                 |                             | Display current key path         |
+| [cd](#cd)                   | [key]                       | Change current key path          |
+| [ls](#ls)                   | [-l] [key]                  | List key values                  |
+| [get](#get)                 | key                         | Get key value                    |
+| [put](#put)                 | key value                   | Put key value                    |
+| [del](#del)                 | key                         | Delete key entry                 |
+| [purge](#purge)             | prefix                      | Delete matching keys             |
+| [cls](#cls)                 |                             | Clear the screen                 |
+| [echo](#echo)               | [-n] [string]               | Write to standard output         |
+| [ask](#ask)                 | [prompt] [default]          | Read from standard input         |
+| [curl](#curl)               | url [method] [value]        | Send http request to url         |
+| [wait](#wait)               | [period]                    | Wait for specified time period   |
+| [run](#run)                 | file                        | Run script file                  |
+| [exit](#exit)               | [code]                      | Exit the console with code       |
+| [quit](#quit)               |                             | Quit the console                 |
 
 #### help
 
@@ -179,9 +180,9 @@ output [name] [value]
 | `\h`             | Host name                        | myserver.io            |
 | `\H`             | Fully qualified host name        | https://myserver.io    |
 | `\s`             | Shell name                       | cns                    |
-| `\v`             | Shell version                    | 0.1.1                  |
+| `\v`             | Shell version                    | 0.1.4                  |
 | `\V`             | Shell release version            | 0.1                    |
-| `\w`             | Current path                     | ~/nodes/node1          |
+| `\w`             | Current path                     | ~/sys1/nodes/node1     |
 | `\W`             | Current directory                | node1                  |
 | `\d`             | Current short form date          | 20/06/2025             |
 | `\D`             | Current long form date           | FRI 20 JUN 2025        |
@@ -222,46 +223,46 @@ connect
 disconnect
 ```
 
-#### network
+#### system
 
 ```sh
-network
+system
 ```
 
 #### profiles
 
 ```sh
-profiles [-i] [profile]
+profiles system [-i] [profile]
 ```
 
 #### nodes
 
 ```sh
-nodes [node]
+nodes system [node]
 ```
 
 #### contexts
 
 ```sh
-contexts [node] [context]
+contexts system node [context]
 ```
 
 #### providers
 
 ```sh
-providers [node] [context] [profile]
+providers system node context profile
 ```
 
 #### consumers
 
 ```sh
-consumers [node] [context] [profile]
+consumers system node context profile
 ```
 
 #### map
 
 ```sh
-map
+map [system] [node] [context]
 ```
 
 #### find
@@ -373,10 +374,9 @@ quit
 | $path        | Current key path                 | cns/network/nodes/node1    |
 | $ask         | Input from previous ask command  | My input                   |
 
-environment, output, stats
+environment, config, output, stats, variables
 
 ## Maintainers
-
 
 ## License
 

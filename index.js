@@ -3,45 +3,6 @@
 // index.js - CNS Command line
 // Copyright 2025 Padi, Inc. All Rights Reserved.
 
-// connections [node] [context] [role] [profile]
-// emulate [node] [context] [role] [profile] [-r]
-// watch [node] [context] [role] [profile] [-r]
-// sanitize
-// optimize
-// backup file
-// restore file
-
-// top (changes)
-// log key
-// push (network to etcd server)
-// pull (network from etcd server)
-// on error break|resume
-// on key command
-// every ms command
-// clear
-
-// if expr command
-// foreach command ($for)
-// :label
-// goto label
-// gosub label
-// return
-// break
-//  'exec': exec,
-// set var value
-
-// output format json - errors etc
-// add output arg to $1 = command
-// orchestrate command
-// dont allow profile put or del (or purge except whole profile)
-// add /api endpoint for GET, PUT, DELETE
-// merge provider / consumer command as capability
-// add watch / unwatch cli command
-// nodeExist function etc...
-// add keys command
-// map === connections?
-// remove find (use ls)
-
 'use strict';
 
 // Imports
@@ -154,14 +115,14 @@ const commands = {
   'init': init,
   'connect': connect,
   'disconnect': disconnect,
-  'network': network,
+  'systems': systems,
   'profiles': profiles,
   'nodes': nodes,
   'contexts': contexts,
   'providers': providers,
   'consumers': consumers,
-  'conns': conns,
-//  'map': map,
+  'connections': connections,
+  'map': map,
   'find': find,
   'pwd': pwd,
   'cd': cd,
@@ -787,7 +748,7 @@ function wildcard(loc) {
 
   const parts = loc.split('/');
 
-  if (parts[0] === 'cns')// && parts[1] === 'network')
+  if (parts[0] === 'cns')// && parts[1] !== undefined)
     absolute = true;
 
   // Relative path?
@@ -806,9 +767,7 @@ function expand(loc) {
   const parts = loc.split('/');
 
   if (parts[0] === '~') {
-    parts.unshift('cns');
-    parts[1] = 'network';
-
+    parts[0] = 'cns';
     return parts.join('/');
   }
   return loc;
@@ -818,10 +777,8 @@ function expand(loc) {
 function shorten(loc) {
   const parts = loc.split('/');
 
-  if (parts[0] === 'cns' && parts[1] === 'network') {
-    parts.shift();
+  if (parts[0] === 'cns') {
     parts[0] = '~';
-
     return parts.join('/');
   }
   return loc;
@@ -865,38 +822,38 @@ function cast(current, value) {
 // Show help information
 function help() {
   // Output help
-  print('  help                                     Output help information');
-  print('  version                                  Output version information');
-  print('  status [name]                            Output status properties');
-  print('  output [name] [value]                    Configure output properties');
-  print('  dashboard [port]                         Start CNS Dashboard service');
-  print('  init                                     Initialize config file');
-  print('  connect                                  Connect to network');
-  print('  disconnect                               Disconnect from network');
-  print('  network                                  Configure network properties');
-  print('  profiles [-i] [profile]                  Configure profile properties');
-  print('  nodes [node]                             Configure node properties');
-  print('  contexts [node] [context]                Configure context properties');
-  print('  providers [node] [context] [profile]     Configure provider properties');
-  print('  consumers [node] [context] [profile]     Configure consumer properties');
-  print('  conns [node] [context] [profile] [role]  Display profile connections');
-//  print('  map                                      Display network map');
-  print('  find [filter]                            Find matching keys');
-  print('  pwd                                      Display current key path');
-  print('  cd [key]                                 Change current key path');
-  print('  ls [key]                                 List key values');
-  print('  get key                                  Get key value');
-  print('  put key value                            Put key value');
-  print('  del key                                  Delete key entry');
-  print('  purge prefix                             Purge key entries');
-  print('  cls                                      Clear the screen');
-  print('  echo [-n] [string]                       Write to standard output');
-  print('  ask [prompt] [default]                   Read from standard input');
-  print('  curl url [method] [data]                 Send http request to url');
-  print('  wait [period]                            Wait for specified time');
-  print('  run file                                 Run script file');
-  print('  exit [code]                              Exit the console with code');
-  print('  quit                                     Quit the console');
+  print('  help                                   Output help information');
+  print('  version                                Output version information');
+  print('  status [name]                          Output status properties');
+  print('  output [name] [value]                  Configure output properties');
+  print('  dashboard [port]                       Start CNS Dashboard service');
+  print('  init                                   Initialize config file');
+  print('  connect                                Connect to network');
+  print('  disconnect                             Disconnect from network');
+  print('  systems [system]                       Configure system properties');
+  print('  profiles system [-i] [profile] [ver]   Configure profile properties');
+  print('  nodes system [node]                    Configure node properties');
+  print('  contexts system node [context]         Configure context properties');
+  print('  providers system node context profile  Configure provider properties');
+  print('  consumers system node context profile  Configure consumer properties');
+  print('  connections [system] [node] [context]  Display profile connections');
+  print('  map                                    Display system map');
+  print('  find [filter]                          Find matching keys');
+  print('  pwd                                    Display current path');
+  print('  cd [path]                              Change current path');
+  print('  ls [key]                               List key values');
+  print('  get key                                Get key value');
+  print('  put key value                          Put key value');
+  print('  del key                                Delete key entry');
+  print('  purge prefix                           Purge key entries');
+  print('  cls                                    Clear the screen');
+  print('  echo [-n] [string]                     Write to standard output');
+  print('  ask [prompt] [default]                 Read from standard input');
+  print('  curl url [method] [data]               Send http request to url');
+  print('  wait [period]                          Wait for specified time');
+  print('  run file                               Run script file');
+  print('  exit [code]                            Exit the console with code');
+  print('  quit                                   Quit the console');
 
   // Console mode?
   if (terminal !== undefined && pipe === undefined)
@@ -1033,7 +990,7 @@ async function connect() {
 
   // Get cache
   cache = await client.getAll()
-    .prefix('cns/network')
+    .prefix('cns')
     .strings()
     .catch((e) => {
       // Failure
@@ -1046,7 +1003,7 @@ async function connect() {
   debug('Watching...');
 
   watcher = await client.watch()
-    .prefix('cns/network')
+    .prefix('cns')
     .create()
     .catch((e) => {
       // Failure
@@ -1136,60 +1093,72 @@ async function disconnect() {
   cd();
 }
 
-// Configure network
-async function network() {
-  // Must be console
-  if (pipe !== undefined)
-    throw new Error(E_AVAILABLE);
-
+// Configure systems
+async function systems(arg1, arg2, arg3, arg4) {
   // Must be connected
   if (client === undefined)
     throw new Error(E_CONNECT);
 
-  // Output help
-  print('This utility will walk you through setting up network properties.');
-  print('It only covers the most common items, and tries to guess sensible defaults.\n');
+  var system = argument(arg1, '$new');
+  var name = argument(arg2, 'New System');
+  var orchestrator = argument(arg3, 'allsystems');
+  var token = argument(arg4, '$uuid');
 
-  print('Press ^C at any time to quit.\n');
+  // System namespace
+  const ns = 'cns/' + system + '/';
 
-  // Ask questions
-  const ns = 'cns/network/';
+  // Edit in console?
+  if (pipe === undefined) {
+    // Output help
+    print('This utility will walk you through setting up system properties.');
+    print('It only covers the most common items, and tries to guess sensible defaults.\n');
 
-  const answers = await questions([
-      'Network Name',
-      'Network Orchestrator',
-      'Network Token'
-    ], [
-      cache[ns + 'name'] || 'New Network',
-      cache[ns + 'orchestrator'] || 'contexts',
-      cache[ns + 'token'] || ''
-    ]);
+    print('Press ^C at any time to quit.\n');
 
-  // Prompt to write
-  print('\nAbout to publish properties:\n');
+    // Ask questions
+    const answers = await questions([
+        'System Name',
+        'System Orchestrator',
+        'System Token'
+      ], [
+        cache[ns + 'name'] || name,
+        cache[ns + 'orchestrator'] || orchestrator,
+        cache[ns + 'token'] || token
+      ]);
 
-  print('name = ' + answers[0]);
-  print('orchestrator = ' + answers[1]);
-  print('token = ' + answers[2]);
+    // Get answers
+    name = answers[0];
+    orchestrator = answers[1];
+    token = answers[2];
 
-  await confirmation();
+    // Prompt to write
+    print('\nAbout to publish properties:\n');
+
+    print('name = ' + name);
+    print('orchestrator = ' + orchestrator);
+    print('token = ' + token);
+
+    await confirmation();
+  }
 
   // Update new values
-  put(ns + 'name', answers[0]);
-  put(ns + 'orchestrator', answers[1]);
-  put(ns + 'token', answers[2]);
+  put(ns + 'name', name);
+  put(ns + 'orchestrator', orchestrator);
+  put(ns + 'token', token);
 
   cd(ns);
 }
 
 // Configure profile
-async function profiles(arg1, arg2) {
-  const profile = argument(arg1);
-  const version = argument(arg2);
+async function profiles(arg1, arg2, arg3) {
+  var system = required(arg1);
+  var profile = argument(arg2);
+  var version = argument(arg3);
 
   // Install profile?
   if (profile === '-i') {
-    const profile = version;
+    // Shift params
+    profile = version;
 
     // List descriptors?
     if (profile === undefined) {
@@ -1205,7 +1174,7 @@ async function profiles(arg1, arg2) {
       const title = descriptor.title || '';
       const versions = descriptor.versions || [];
 
-      const ns = 'cns/network/profiles/' + profile + '/';
+      const ns = 'cns/' + system + '/profiles/' + profile + '/';
 
       // Purge existing
       await purge(ns + 'versions');
@@ -1243,86 +1212,80 @@ async function profiles(arg1, arg2) {
 
   // List profiles?
   if (profile === undefined) {
-    display('profiles', getProfiles());
+    display('profiles', getProfiles(system));
     return;
   }
 
   // Profile must exist
-  if (cache['cns/network/profiles/' + profile + '/name'] === undefined)
+  if (cache['cns/' + system + '/profiles/' + profile + '/name'] === undefined)
     throw new Error(E_FOUND + ': ' + profile);
 
   // List versions?
   if (version === undefined) {
-    display(profile, getVersions(profile));
+    display(profile, getVersions(system, profile));
     return;
   }
 
   // Version must exist
-  if (cache['cns/network/profiles/' + profile + '/versions/version' + version + '/name'] === undefined)
+  if (cache['cns/' + system + '/profiles/' + profile + '/versions/version' + version + '/name'] === undefined)
     throw new Error(E_FOUND + ': ' + profile + ' version ' + version);
 
   // List version properties
-  display(profile, getProperties(profile, version));
+  display(profile, getProperties(system, profile, version));
 }
 
 // Configure node
-async function nodes(arg1, arg2, arg3, arg4) {
+async function nodes(arg1, arg2, arg3, arg4, arg5) {
   // Must be connected
   if (client === undefined)
     throw new Error(E_CONNECT);
 
-  var network = 'network';
-  var node = argument(arg1);
-  var name = argument(arg2, 'New Node');
-  var upstream = argument(arg3, 'no');
-  var token = argument(arg4, '$uuid');
+  var system = required(arg1);
+  var node = argument(arg2, '$new');
+  var name = argument(arg3, 'New Node');
+  var upstream = argument(arg4, 'no');
+  var token = argument(arg5, '$uuid');
 
-  // List nodes?
-  if (node === undefined) {
-    display('nodes', getNodes());
-    return;
-  }
+  // System must exist
+  if (cache['cns/' + system + '/name'] === undefined)
+    throw new Error(E_FOUND + ': ' + node);
+
+  // Node namespace
+  const ns = 'cns/' + system + '/nodes/' + node + '/';
 
   // Edit in console?
   if (pipe === undefined) {
     // Output help
-    print('This utility will walk you through setting up a network node.');
+    print('This utility will walk you through setting up a system node.');
     print('It only covers the most common items, and tries to guess sensible defaults.\n');
 
     print('Press ^C at any time to quit.\n');
 
-    const ns = 'cns/network/nodes/' + node + '/';
-
     // Ask questions
     const answers = await questions([
-        'SystemID',
         'Node Name',
         'Node Upstream',
         'Node Token'
       ], [
-        '',
         cache[ns + 'name'] || name,
         cache[ns + 'upstream'] || upstream,
         cache[ns + 'token'] || token
       ]);
 
+    // Get answers
+    name = answers[0];
+    upstream = answers[1];
+    token = answers[2];
+
     // Prompt to write
     print('\nAbout to publish properties:\n');
 
-    print('name = ' + answers[1]);
-    print('upstream = ' + answers[2]);
-    print('token = ' + answers[3]);
+    print('name = ' + name);
+    print('upstream = ' + upstream);
+    print('token = ' + token);
 
     await confirmation();
-
-    // Update new values
-    network = answers[0];
-    name = answers[1];
-    upstream = answers[2];
-    token = answers[3];
   }
-
-  const ns = 'cns/' + network + '/nodes/' + node + '/';
 
   // Update new values
   await put(ns + 'name', name);
@@ -1333,38 +1296,27 @@ async function nodes(arg1, arg2, arg3, arg4) {
 }
 
 // Configure context
-async function contexts(arg1, arg2, arg3, arg4) {
+async function contexts(arg1, arg2, arg3, arg4, arg5) {
   // Must be connected
   if (client === undefined)
     throw new Error(E_CONNECT);
 
-  var node = argument(arg1);
-  var context = argument(arg2);
-  var name = argument(arg3, 'New Context');
-  var token = argument(arg4, '$uuid');
+  var system = required(arg1);
+  var node = required(arg2);
+  var context = argument(arg3, '$new');
+  var name = argument(arg4, 'New Context');
+  var token = argument(arg5, '$uuid');
 
-  // List all contexts?
-  if (node === undefined) {
-    const nodes = getNodes();
-
-    for (const node in nodes)
-      nodes[node] = getContexts(node);
-
-    display('nodes', nodes);
-    return;
-  }
-
-  // Node must exist
-  if (cache['cns/network/nodes/' + node + '/name'] === undefined)
+  // System must exist
+  if (cache['cns/' + system + '/name'] === undefined)
     throw new Error(E_FOUND + ': ' + node);
 
-  // List contexts?
-  if (context === undefined) {
-    display('contexts', getContexts(node));
-    return;
-  }
+  // Node must exist
+  if (cache['cns/' + system + '/nodes/' + node + '/name'] === undefined)
+    throw new Error(E_FOUND + ': ' + node);
 
-  const ns = 'cns/network/nodes/' + node + '/contexts/' + context + '/';
+  // Context namespace
+  const ns = 'cns/' + system + '/nodes/' + node + '/contexts/' + context + '/';
 
   // Edit in console?
   if (pipe === undefined) {
@@ -1383,17 +1335,17 @@ async function contexts(arg1, arg2, arg3, arg4) {
         cache[ns + 'token'] || token
       ]);
 
+    // Get answers
+    name = answers[0];
+    token = answers[1];
+
     // Prompt to write
     print('\nAbout to publish properties:\n');
 
-    print('name = ' + answers[0]);
-    print('token = ' + answers[1]);
+    print('name = ' + name);
+    print('token = ' + token);
 
     await confirmation();
-
-    // Update new values
-    name = answers[0];
-    token = answers[1];
   }
 
   // Update new values
@@ -1404,67 +1356,41 @@ async function contexts(arg1, arg2, arg3, arg4) {
 }
 
 // Configure provider
-async function providers(arg1, arg2, arg3, arg4, arg5) {
+async function providers(arg1, arg2, arg3, arg4, arg5, arg6) {
   // Must be connected
   if (client === undefined)
     throw new Error(E_CONNECT);
 
-  const node = argument(arg1);
-  const context = argument(arg2);
-  const profile = argument(arg3);
-  const version = argument(arg4, 1);
-  const scope = argument(arg5, '');
+  var system = required(arg1);
+  var node = required(arg2);
+  var context = required(arg3);
+  var profile = required(arg4);
+  var version = argument(arg5, 1);
+  var scope = argument(arg6, '');
 
-  // List all providers?
-  if (node === undefined) {
-    const nodes = getNodes();
-
-    for (const node in nodes) {
-      const contexts = getContexts(node);
-
-      for (const context in contexts)
-        contexts[context] = getCapabilities(node, context, 'provider');
-
-      nodes[node] = contexts;
-    }
-    display('nodes', nodes);
-    return;
-  }
-
-  // Node must exist
-  if (cache['cns/network/nodes/' + node + '/name'] === undefined)
+  // System must exist
+  if (cache['cns/' + system + '/name'] === undefined)
     throw new Error(E_FOUND + ': ' + node);
 
-  // List all providers?
-  if (context === undefined) {
-    const contexts = getContexts(node);
-
-    for (const context in contexts)
-      contexts[context] = getCapabilities(node, context, 'provider');
-
-    display('contexts', contexts);
-    return;
-  }
+  // Node must exist
+  if (cache['cns/' + system + '/nodes/' + node + '/name'] === undefined)
+    throw new Error(E_FOUND + ': ' + node);
 
   // Context must exist
-  if (cache['cns/network/nodes/' + node + '/contexts/' + context + '/name'] === undefined)
+  if (cache['cns/' + system + '/nodes/' + node + '/contexts/' + context + '/name'] === undefined)
     throw new Error(E_FOUND + ': ' + context);
 
-  // List providers?
-  if (profile === undefined) {
-    display('provider', getCapabilities(node, context, 'provider'));
-    return;
-  }
-
   // Profile must exist
-  if (cache['cns/network/profiles/' + profile + '/name'] === undefined)
+  if (cache['cns/' + system + '/profiles/' + profile + '/name'] === undefined)
     throw new Error(E_FOUND + ': ' + profile);
 
-  const ns = 'cns/network/nodes/' + node + '/contexts/' + context + '/provider/' + profile + '/';
-  const ps = 'cns/network/profiles/' + profile + '/versions/version' + version + '/properties/';
+  // Profile namespaces
+  const ns = 'cns/' + system + '/nodes/' + node + '/contexts/' + context + '/provider/' + profile + '/';
+  const ps = 'cns/' + system + '/profiles/' + profile + '/versions/version' + version + '/properties/';
 
   // Get property values
   const properties = [];
+  const prompts = [];
   const defaults = [];
 
   const keys = filter(cache, ps + '*/name');
@@ -1479,6 +1405,7 @@ async function providers(arg1, arg2, arg3, arg4, arg5) {
     if (provider === 'yes') {
       // Add to list
       properties.push(property);
+      prompts.push(cache[ps + property + '/name'] || property);
       defaults.push(cache[ns + 'properties/' + property] || '');
     }
   }
@@ -1495,7 +1422,7 @@ async function providers(arg1, arg2, arg3, arg4, arg5) {
 
     // Ask questions
     answers = await questions(
-      properties,
+      prompts,
       defaults);
 
     // Prompt to write
@@ -1521,67 +1448,41 @@ async function providers(arg1, arg2, arg3, arg4, arg5) {
 }
 
 // Configure consumer
-async function consumers(arg1, arg2, arg3, arg4, arg5) {
+async function consumers(arg1, arg2, arg3, arg4, arg5, arg6) {
   // Must be connected
   if (client === undefined)
     throw new Error(E_CONNECT);
 
-  const node = argument(arg1);
-  const context = argument(arg2);
-  const profile = argument(arg3);
-  const version = argument(arg4, 1);
-  const scope = argument(arg5, '');
+  var system = required(arg1);
+  var node = required(arg2);
+  var context = required(arg3);
+  var profile = required(arg4);
+  var version = argument(arg5, 1);
+  var scope = argument(arg6, '');
 
-  // List all consumers?
-  if (node === undefined) {
-    const nodes = getNodes();
-
-    for (const node in nodes) {
-      const contexts = getContexts(node);
-
-      for (const context in contexts)
-        contexts[context] = getCapabilities(node, context, 'consumer');
-
-      nodes[node] = contexts;
-    }
-    display('nodes', nodes);
-    return;
-  }
-
-  // Node must exist
-  if (cache['cns/network/nodes/' + node + '/name'] === undefined)
+  // System must exist
+  if (cache['cns/' + system + '/name'] === undefined)
     throw new Error(E_FOUND + ': ' + node);
 
-  // List all consumers?
-  if (context === undefined) {
-    const contexts = getContexts(node);
-
-    for (const context in contexts)
-      contexts[context] = getCapabilities(node, context, 'consumer');
-
-    display('contexts', contexts);
-    return;
-  }
+  // Node must exist
+  if (cache['cns/' + system + '/nodes/' + node + '/name'] === undefined)
+    throw new Error(E_FOUND + ': ' + node);
 
   // Context must exist
-  if (cache['cns/network/nodes/' + node + '/contexts/' + context + '/name'] === undefined)
+  if (cache['cns/' + system + '/nodes/' + node + '/contexts/' + context + '/name'] === undefined)
     throw new Error(E_FOUND + ': ' + context);
 
-  // List consumers?
-  if (profile === undefined) {
-    display('consumer', getCapabilities(node, context, 'consumer'));
-    return;
-  }
-
   // Profile must exist
-  if (cache['cns/network/profiles/' + profile + '/name'] === undefined)
+  if (cache['cns/' + system + '/profiles/' + profile + '/name'] === undefined)
     throw new Error(E_FOUND + ': ' + profile);
 
-  const ns = 'cns/network/nodes/' + node + '/contexts/' + context + '/consumer/' + profile + '/';
-  const ps = 'cns/network/profiles/' + profile + '/versions/version' + version + '/properties/';
+  // Profile namespaces
+  const ns = 'cns/' + system + '/nodes/' + node + '/contexts/' + context + '/consumer/' + profile + '/';
+  const ps = 'cns/' + system + '/profiles/' + profile + '/versions/version' + version + '/properties/';
 
   // Get property values
   const properties = [];
+  const prompts = [];
   const defaults = [];
 
   const keys = filter(cache, ps + '*/name');
@@ -1596,6 +1497,7 @@ async function consumers(arg1, arg2, arg3, arg4, arg5) {
     if (provider !== 'yes') {
       // Add to list
       properties.push(property);
+      prompts.push(cache[ps + property + '/name'] || property);
       defaults.push(cache[ns + 'properties/' + property] || '');
     }
   }
@@ -1612,7 +1514,7 @@ async function consumers(arg1, arg2, arg3, arg4, arg5) {
 
     // Ask questions
     answers = await questions(
-      properties,
+      prompts,
       defaults);
 
     // Prompt to write
@@ -1638,56 +1540,70 @@ async function consumers(arg1, arg2, arg3, arg4, arg5) {
 }
 
 // Display profile connections
-function conns(arg1, arg2, arg3, arg4) {
+function connections(arg1, arg2, arg3, arg4, arg5) {
   // Must be connected
   if (client === undefined)
     throw new Error(E_CONNECT);
 
-  const node = argument(arg1, '*');
-  const context = argument(arg2, '*');
-  const role = argument(arg3, '*');
-  const profile = argument(arg4, '*');
+  const system = argument(arg1, '*');
+  const node = argument(arg2, '*');
+  const context = argument(arg3, '*');
+  const role = argument(arg4, '*');
+  const profile = argument(arg5, '*');
 
-  const ns = 'cns/network/nodes/' + node + '/contexts/' + context + '/' + role + '/' + profile + '/connections/*/';
+  // Filter connections
+  const ns = 'cns/' + system + '/nodes/' + node + '/contexts/' + context + '/' + role + '/' + profile + '/connections/*/';
 
-  const nodes = {};
+  const systems = {};
   const keys = filter(cache, ns + '*');
 
   for (const key in keys) {
     const parts = key.split('/');
 
+    const system = parts[1];
     const node = parts[3];
     const context = parts[5];
     const role = parts[6];
     const profile = parts[7];
     const conn = parts[9];
-//    const other = parts[10];
 
     parts.pop();
+
+    // Add system?
+    if (systems[system] === undefined)
+      systems[system] = {};
+
+    // Add node?
+    const nodes = systems[system];
 
     if (nodes[node] === undefined)
       nodes[node] = {};
 
+    // Add context?
     const contexts = nodes[node];
 
     if (contexts[context] === undefined)
       contexts[context] = {};
 
+    // Add role?
     const roles = contexts[context];
 
     if (roles[role] === undefined)
       roles[role] = {};
 
+    // Add profile?
     const profiles = roles[role];
 
     if (profiles[profile] === undefined)
       profiles[profile] = {};
 
+    // Add connections?
     const connections = profiles[profile];
 
     if (connections[conn] === undefined)
       connections[conn] = {};
 
+    // Add connection properties
     const properties = connections[conn];
     const keys = filter(cache, parts.join('/') + '/properties/*');
 
@@ -1698,124 +1614,72 @@ function conns(arg1, arg2, arg3, arg4) {
       properties[property] = keys[key];
     }
   }
-
-  display('nodes', nodes);
-
-
-//console.log(keys);
-
+  display('systems', systems);
 }
 
-/*
-// Map network
-async function map(arg1, arg2) {
-  // Must be connected
-  if (client === undefined)
-    throw new Error(E_CONNECT);
+// Display system map
+function map(arg1, arg2, arg3) {
+  var system = argument(arg1);
+  var node = argument(arg2);
+  var context = argument(arg3);
 
-  const node = argument(arg1);
-  const context = argument(arg2);
-
-  // Map properties
-  function properties(node, context, role, profile, connection) {
-    const props = {};
-    const keys = filter(cache, 'cns/network/nodes/' + node + '/contexts/' + context + '/' + role + '/' + profile + '/connections/' + connection + '/properties/*');
-
-    for (const key in keys) {
-      const parts = key.split('/');
-      const property = parts[11];
-
-      props[property] = keys[key];
-    }
-    return props;
-  }
-
-  // Map connections
-  function connections(node, context, role, profile) {
-    const anti = (role === 'provider')?'consumer':'provider';
-
-    const conns = {};*/
-//    const keys = filter(cache, 'cns/network/nodes/' + node + '/contexts/' + context + '/' + role + '/' + profile + '/connections/*/' + anti);
-/*
-    for (const key in keys) {
-      const parts = key.split('/');
-      const connection = parts[9];
-
-      conns[connection] = properties(node, context, role, profile, connection);
-    }
-    return conns;
-  }
-
-  // Map profiles
-  function profiles(node, context, role) {
-    const profiles = {};*/
-//    const keys = filter(cache, 'cns/network/nodes/' + node + '/contexts/' + context + '/' + role + '/*/version');
-/*
-    for (const key in keys) {
-      const parts = key.split('/');
-      const profile = parts[7];
-
-      profiles[profile] = connections(node, context, role, profile);
-    }
-    return profiles;
-  }
-
-  // Map capabilities
-  function capabilities(node, context) {
-    const capabilities = {};
-
-    const provider = profiles(node, context, 'provider');
-    const consumer = profiles(node, context, 'consumer');
-
-    if (Object.keys(provider).length > 0) capabilities.provider = provider;
-    if (Object.keys(consumer).length > 0) capabilities.consumer = consumer;
-
-    return capabilities;
-  }
-
-  // Map contexts
-  function contexts(node) {
-    const contexts = {};*/
-//    const keys = filter(cache, 'cns/network/nodes/' + node + '/contexts/*/name');
-/*
-    for (const key in keys) {
-      const parts = key.split('/');
-      const context = parts[5];
-
-      contexts[context] = capabilities(node, context);
-    }
-    return contexts;
-  }
-
-  // Map nodes
-  function nodes() {
-    const nodes = {};*/
-//    const keys = filter(cache, 'cns/network/nodes/*/name');
-/*
-    for (const key in keys) {
-      const parts = key.split('/');
-      const node = parts[3];
-
-      nodes[node] = contexts(node);
-    }
-    return nodes;
-  }
-
-  // Map network?
-  if (node === undefined) {
-    display('nodes', nodes());
+  // Map of context?
+  if (context !== undefined) {
+    // Show context roles
+    display(context, getRoles(system, node, context));
     return;
   }
 
-  // Map node?
-  if (context === undefined) {
-    display(node, contexts(node));
+  // Map of node?
+  if (node !== undefined) {
+    // Show contexts and roles
+    const contexts = getContexts(system, node);
+
+    for (const context in contexts)
+      contexts[context] = getRoles(system, node, context);
+
+    display(node, contexts);
     return;
   }
 
-  // Map context
-  display(context, capabilities(node, context));
-}*/
+  // Map of system?
+  if (system !== undefined) {
+    // Show nodes
+    const nodes = getNodes(system);
+
+    for (const node in nodes) {
+      // Show contexts and roles
+      const contexts = getContexts(system, node);
+
+      for (const context in contexts)
+        contexts[context] = getRoles(system, node, context);
+
+      nodes[node] = contexts;
+    }
+    display(system, nodes);
+    return;
+  }
+
+  // Map of systems
+  const systems = getSystems();
+
+  for (const system in systems) {
+    // Show nodes
+    const nodes = getNodes(system);
+
+    for (const node in nodes) {
+      // Show contexts and roles
+      const contexts = getContexts(system, node);
+
+      for (const context in contexts)
+        contexts[context] = getRoles(system, node, context);
+
+      nodes[node] = contexts;
+    }
+    systems[system] = nodes;
+  }
+  display('systems', systems);
+}
 
 // Find matching keys
 function find(arg1) {
@@ -1833,7 +1697,7 @@ function find(arg1) {
 
   for (const key in cache) {
     // Ignore profiles
-    if (key.startsWith('cns/network/profiles/')) continue;
+    if (match(key, 'cns/*/profiles/*')) continue;
 
     // Has name, version or consumer?
     const t1 = key.endsWith('/name');
@@ -1859,8 +1723,9 @@ function find(arg1) {
   }
 
   // Show found keys
-  display('found', keys);
+  display(total + ' found', keys);
 
+  // Goto result?
   if (total === 1) cd(ns);
 }
 
@@ -2133,16 +1998,11 @@ function format(root, value) {
     (typeof value !== 'object' || Object.keys(value).length > 0)) {
     // What output format?
     switch (options.format) {
-      case F_TEXT:
-        return text(root, value, '');
-      case F_TREE:
-        return tree(root, value);
-      case F_TABLE:
-        return table(root, value);
-      case F_JSON:
-        return json(root, value);
-      case F_XML:
-        return '<?xml version="1.0" encoding="UTF-8"?>\n' + xml(root, value, '');
+      case F_TEXT: return text(root, value, '');
+      case F_TREE: return tree(root, value);
+      case F_TABLE: return table(root, value);
+      case F_JSON: return json(root, value);
+      case F_XML: return '<?xml version="1.0" encoding="UTF-8"?>\n' + xml(root, value, '');
     }
   }
   return '';
@@ -2410,6 +2270,22 @@ async function input(prompt, def) {
   });
 }
 
+// Get systems
+function getSystems() {
+  const systems = {};
+
+  const prefix = 'cns/*/name';
+  const keys = filter(cache, prefix);
+
+  for (const key in keys) {
+    const parts = key.split('/');
+    const system = parts[1];
+
+    systems[system] = keys[key];
+  }
+  return systems;
+}
+
 // Get profile descriptors
 async function getDescriptors() {
   if (descriptors === undefined) {
@@ -2427,11 +2303,11 @@ async function getDescriptors() {
   return descriptors;
 }
 
-// Get network profiles
-function getProfiles() {
+// Get system profiles
+function getProfiles(system) {
   const profiles = {};
 
-  const prefix = 'cns/network/profiles/*/name';
+  const prefix = 'cns/' + system + '/profiles/*/name';
   const keys = filter(cache, prefix);
 
   for (const key in keys) {
@@ -2444,10 +2320,10 @@ function getProfiles() {
 }
 
 // Get profile versions
-function getVersions(profile) {
+function getVersions(system, profile) {
   const versions = {};
 
-  const prefix = 'cns/network/profiles/' + profile + '/versions/*/name';
+  const prefix = 'cns/' + system + '/profiles/' + profile + '/versions/*/name';
   const keys = filter(cache, prefix);
 
   for (const key in keys) {
@@ -2460,10 +2336,10 @@ function getVersions(profile) {
 }
 
 // Get profile version properties
-function getProperties(profile, version) {
+function getProperties(system, profile, version) {
   const properties = {};
 
-  const prefix = 'cns/network/profiles/' + profile + '/versions/version' + version + '/properties/*/name';
+  const prefix = 'cns/' + system + '/profiles/' + profile + '/versions/version' + version + '/properties/*/name';
   const keys = filter(cache, prefix);
 
   for (const key in keys) {
@@ -2475,11 +2351,11 @@ function getProperties(profile, version) {
   return properties;
 }
 
-// Get network nodes
-function getNodes() {
+// Get system nodes
+function getNodes(system) {
   const nodes = {};
 
-  const prefix = 'cns/network/nodes/*/name';
+  const prefix = 'cns/' + system + '/nodes/*/name';
   const keys = filter(cache, prefix);
 
   for (const key in keys) {
@@ -2492,10 +2368,10 @@ function getNodes() {
 }
 
 // Get node contexts
-function getContexts(node) {
+function getContexts(system, node) {
   const contexts = {};
 
-  const prefix = 'cns/network/nodes/' + node + '/contexts/*/name';
+  const prefix = 'cns/' + system + '/nodes/' + node + '/contexts/*/name';
   const keys = filter(cache, prefix);
 
   for (const key in keys) {
@@ -2507,11 +2383,24 @@ function getContexts(node) {
   return contexts;
 }
 
+// Get context roles
+function getRoles(system, node, context) {
+  const roles = {};
+
+  const providers = getCapabilities(system, node, context, 'provider');
+  const consumers = getCapabilities(system, node, context, 'consumer');
+
+  if (Object.keys(providers).length > 0) roles.providers = providers;
+  if (Object.keys(consumers).length > 0) roles.consumers = consumers;
+
+  return roles;
+}
+
 // Get context capabilities
-function getCapabilities(node, context, role) {
+function getCapabilities(system, node, context, role) {
   const profiles = {};
 
-  const prefix = 'cns/network/nodes/' + node + '/contexts/' + context + '/' + role + '/*/version';
+  const prefix = 'cns/' + system + '/nodes/' + node + '/contexts/' + context + '/' + role + '/*/version';
   const keys = filter(cache, prefix);
 
   for (const key in keys) {

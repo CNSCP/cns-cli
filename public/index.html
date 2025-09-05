@@ -25,10 +25,8 @@
       <nav list="collapse">
         <button id="list" ripple primary><i>chevron_left</i></button>
         <button id="overview" ripple selected><i>home</i><span>Overview</span></button>
-        <button id="network" ripple><i>wifi</i><span>Network</span></button>
-        <button id="profiles" ripple><i>extension</i><span>Profiles</span></button>
-        <button id="nodes" ripple><i>real_estate_agent</i><span>Nodes</span></button>
-        <button id="keys" ripple><i>dns</i><span>Keys</span></button>
+        <button id="systems" ripple><i>hive</i><span>Systems</span></button>
+        <button id="keys" ripple><i>storage</i><span>Keys</span></button>
         <button id="console" ripple><i>build</i><span>Console</span></button>
         <div></div>
         <button id="about" ripple><i>info</i><span>About</span></button>
@@ -49,7 +47,8 @@
         <aside id="watchers-list" online hidden></aside>
         <aside id="messages-list"></aside>
       </section>
-      <section view="network" hidden>
+<!--
+      <section view="systems" hidden>
         <h1>Network<button id="help" data-tip="Help" data-pos="left" icon primary><i>live_help</i></button></h1>
         <aside hidden>
           <div>
@@ -74,6 +73,8 @@
           </form>
         </aside>
       </section>
+-->
+<!--
       <section view="profiles" hidden>
         <h1>Profiles<button id="help" data-tip="Help" data-pos="left" icon primary><i>live_help</i></button></h1>
         <aside hidden>
@@ -94,8 +95,9 @@
         </aside>
         <aside id="profiles-list" online hidden></aside>
       </section>
-      <section view="nodes" hidden>
-        <h1>Nodes<button id="help" data-tip="Help" data-pos="left" icon primary><i>live_help</i></button></h1>
+-->
+      <section view="systems" hidden>
+        <h1>Systems<button id="help" data-tip="Help" data-pos="left" icon primary><i>live_help</i></button></h1>
         <aside hidden>
           <div>
             <h4>Did you know?</h4>
@@ -106,13 +108,13 @@
         </aside>
         <aside offline hidden><i>wifi_off</i>Network connection is currently offline</aside>
         <aside online hidden>
-          <form id="nodes-form">
-            <label>Search nodes</label>
-            <input id="nodes-search" type="text" maxlength="128" placeholder="node or name" autofocus/>
-            <button id="nodes-enter" icon primary><i>keyboard_return</i></button>
+          <form id="systems-form">
+            <label>Search systems</label>
+            <input id="systems-search" type="text" maxlength="128" placeholder="Identifier or name" autofocus/>
+            <button id="systems-enter" icon primary><i>keyboard_return</i></button>
           </form>
         </aside>
-        <aside id="nodes-list" online hidden></aside>
+        <aside id="systems-list" online hidden></aside>
       </section>
       <section view="keys" hidden>
         <h1>Keys<button id="help" data-tip="Help" data-pos="left" icon primary><i>live_help</i></button></h1>
@@ -128,7 +130,7 @@
         <aside online hidden>
           <form id="keys-form">
             <label>Search keys</label>
-            <input id="keys-search" type="text" maxlength="1024" placeholder="key or value" autofocus/>
+            <input id="keys-search" type="text" maxlength="1024" placeholder="Key or value" autofocus/>
             <button id="keys-enter" icon primary><i>keyboard_return</i></button>
           </form>
         </aside>
@@ -176,11 +178,20 @@
         </aside>
       </section>
     </article>
+    <dialog id="systems-dialog" closeby="none">
+      <h1>Add System<button id="systems-dialog-close" icon primary><i>close</i></button></h1>
+      <form id="systems-dialog-form">
+        <label>System identifier</label>
+        <input id="systems-dialog-id" type="text" maxlength="128" pattern="^[A-Za-z]([A-Za-z0-9]*)" placeholder="Leave blank for uuid" autofocus/>
+        <button id="systems-dialog-ok" primary raised>Add</button>
+        <button id="systems-dialog-cancel" raised>Cancel</button>
+      </form>
+    </dialog>
     <dialog id="nodes-dialog" closeby="none">
       <h1>Add Node<button id="nodes-dialog-close" icon primary><i>close</i></button></h1>
       <form id="nodes-dialog-form">
         <label>Node identifier</label>
-        <input id="nodes-dialog-id" type="text" maxlength="128" pattern="^[A-Za-z]([A-Za-z0-9]*)" placeholder="leave blank for uuid" autofocus/>
+        <input id="nodes-dialog-id" type="text" maxlength="128" pattern="^[A-Za-z]([A-Za-z0-9]*)" placeholder="Leave blank for uuid" autofocus/>
         <button id="nodes-dialog-ok" primary raised>Add</button>
         <button id="nodes-dialog-cancel" raised>Cancel</button>
       </form>
@@ -189,7 +200,7 @@
       <h1>Add Context<button id="contexts-dialog-close" icon primary><i>close</i></button></h1>
       <form id="contexts-dialog-form">
         <label>Context identifier</label>
-        <input id="contexts-dialog-id" type="text" maxlength="128" pattern="^[A-Za-z]([A-Za-z0-9]*)" placeholder="leave blank for uuid" autofocus/>
+        <input id="contexts-dialog-id" type="text" maxlength="128" pattern="^[A-Za-z]([A-Za-z0-9]*)" placeholder="Leave blank for uuid" autofocus/>
         <button id="contexts-dialog-ok" primary raised>Add</button>
         <button id="contexts-dialog-cancel" raised>Cancel</button>
       </form>
@@ -230,7 +241,7 @@
       <h1>Add Key<button id="keys-dialog-close" icon primary><i>close</i></button></h1>
       <form id="keys-dialog-form">
         <label>Key identifier</label>
-        <input id="keys-dialog-key" type="text" maxlength="128" pattern="[A-Za-z0-9\/\.]*" placeholder="cns/network/example" autofocus required/>
+        <input id="keys-dialog-key" type="text" maxlength="128" pattern="[A-Za-z0-9\/\.]*" placeholder="cns/system/example" autofocus required/>
         <label>Key value</label>
         <input id="keys-dialog-value" type="text" maxlength="128" placeholder=""/>
         <button id="keys-dialog-ok" primary raised>Add</button>
@@ -240,7 +251,7 @@
     <dialog id="confirm-dialog" closeby="none">
       <h1><span>Title</span><button id="confirm-dialog-close" icon primary><i>close</i></button></h1>
       <form id="confirm-dialog-form">
-        <p>Value</p>
+        <p>Message</p>
         <h4>Is this OK?</h4>
         <button id="confirm-dialog-ok" primary raised>Yes</button>
         <button id="confirm-dialog-cancel" raised autofocus>No</button>
