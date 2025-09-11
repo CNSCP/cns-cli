@@ -43,12 +43,13 @@ Your application should now be ready to rock.
 
 ### Environment Variables
 
-| Variable         | Description                      | Default                |
-|------------------|----------------------------------|------------------------|
-| CNS_HOST         | Network host URI                 | 127.0.0.1              |
-| CNS_PORT         | Network port                     | 2379                   |
-| CNS_USERNAME     | Network username                 |                        |
-| CNS_PASSWORD     | Network password                 |                        |
+| Variable         | Description                 | Default                     |
+|------------------|-----------------------------|-----------------------------|
+| CNS_HOST         | Network host URI            | 127.0.0.1                   |
+| CNS_PORT         | Network port                | 2379                        |
+| CNS_USERNAME     | Network username            |                             |
+| CNS_PASSWORD     | Network password            |                             |
+| CNS_PROFILES     | Profile server URI          | https://cp.padi.io/profiles |
 
 ### Command Line
 
@@ -66,6 +67,7 @@ cns [options] [ script.cns ] [command]
 | `-P, --port number`     | Set network port                | 2379             |
 | `-u, --username string` | Set network username            |                  |
 | `-p, --password string` | Set network password            |                  |
+| `-R, --profiles uri`    | Set profiles server             | https://cp.padi.io/profiles |
 | `-o, --output format`   | Set output format               | tree             |
 | `-i, --indent size`     | Set output indent size          | 2                |
 | `-c, --columns size`    | Set output column limit         | 0                |
@@ -103,7 +105,6 @@ An optional `--` indicates the end of command line options.
 | [connect](#connect)         |                             | Connect to network               |
 | [disconnect](#disconnect)   |                             | Disconnect from network          |
 | [system](#system)           | [system]                    | Configure system properties      |
-| [profiles](#profiles)       | system [-i] [profile] [ver] | Configure profile properties     |
 | [nodes](#nodes)             | system [node]               | Configure node properties        |
 | [contexts](#contexts)       | system node [context]       | Configure context properties     |
 | [providers](#providers)     | system node context profile | Configure provider properties    |
@@ -227,12 +228,6 @@ disconnect
 
 ```sh
 system
-```
-
-#### profiles
-
-```sh
-profiles system [-i] [profile]
 ```
 
 #### nodes

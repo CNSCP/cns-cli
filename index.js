@@ -70,15 +70,24 @@ const DATE_LONG = {weekday: 'short', day: 'numeric', month: 'short', year: 'nume
 const TIME_SHORT = {hour: '2-digit', minute: '2-digit'};
 const TIME_LONG = {hour: 'numeric', minute: '2-digit', hour12: true};
 
-const PROFILE_HOST = 'https://cp.padi.io/profiles';
+// Defaults
+
+const defaults = {
+  host: '127.0.0.1',
+  port: '2379',
+  username: '',
+  password: '',
+  profiles: 'https://cp.padi.io/profiles'
+};
 
 // Configuration
 
 const config = {
-  host: process.env.CNS_HOST || '127.0.0.1',
-  port: process.env.CNS_PORT || '2379',
-  username: process.env.CNS_USERNAME || '',
-  password: process.env.CNS_PASSWORD || ''
+  host: process.env.CNS_HOST || defaults.host,
+  port: process.env.CNS_PORT || defaults.port,
+  username: process.env.CNS_USERNAME || defaults.username,
+  password: process.env.CNS_PASSWORD || defaults.password,
+  profiles: process.env.CNS_PROFILES || defaults.profiles
 };
 
 // Options
@@ -115,8 +124,8 @@ const commands = {
   'init': init,
   'connect': connect,
   'disconnect': disconnect,
+//  'profiles': profiles,
   'systems': systems,
-  'profiles': profiles,
   'nodes': nodes,
   'contexts': contexts,
   'providers': providers,
@@ -150,7 +159,11 @@ const shortcuts = {
   'o': 'output',
   'i': 'init',
   'c': 'connections',
+  'm': 'map',
+  'f': 'find',
   '?': 'echo',
+  'w': 'wait',
+  'r': 'run',
   'e': 'exit',
   'q': 'quit'
 };
@@ -159,11 +172,11 @@ const shortcuts = {
 
 var client;
 
+var profiles;
 var cache;
 var watcher;
 
 var variables;
-var descriptors;
 
 var server;
 var wss;
@@ -222,28 +235,30 @@ function usage() {
   print('Usage: cns [options] [ script.cns ] [command]');
 
   print('\nOptions:');
-  print('  -h, --help                  Output usage information');
-  print('  -v, --version               Output version information');
-  print('  -H, --host uri              Set network host');
-  print('  -P, --port number           Set network port');
-  print('  -u, --username string       Set network username');
-  print('  -p, --password string       Set network password');
-  print('  -o, --output format         Set output format');
-  print('  -i, --indent size           Set output indent size');
-  print('  -c, --columns size          Set output column limit');
-  print('  -r, --rows size             Set output row limit');
-  print('  -m, --monochrome            Disable console colours');
-  print('  -s, --silent                Disable console output');
-  print('  -d, --debug                 Enable debug output');
+  print('  -h, --help                    Output usage information');
+  print('  -v, --version                 Output version information');
+  print('  -H, --host uri                Set network host');
+  print('  -P, --port number             Set network port');
+  print('  -u, --username string         Set network username');
+  print('  -p, --password string         Set network password');
+  print('  -R, --profiles                Set profile server');
+  print('  -o, --output format           Set output format');
+  print('  -i, --indent size             Set output indent size');
+  print('  -c, --columns size            Set output column limit');
+  print('  -r, --rows size               Set output row limit');
+  print('  -m, --monochrome              Disable console colours');
+  print('  -s, --silent                  Disable console output');
+  print('  -d, --debug                   Enable debug output');
 
   print('\nCommands:');
   help();
 
   print('\nEnvironment:');
-  print('  CNS_HOST                    Default network host');
-  print('  CNS_PORT                    Default network port');
-  print('  CNS_USERNAME                Default network username');
-  print('  CNS_PASSWORD                Default network password');
+  print('  CNS_HOST                      Default network host');
+  print('  CNS_PORT                      Default network port');
+  print('  CNS_USERNAME                  Default network username');
+  print('  CNS_PASSWORD                  Default network password');
+  print('  CNS_PROFILES                  Default profile server');
 
   print('\nDocumentation can be found at https://github.com/cnscp/cns-cli/');
 }
@@ -306,6 +321,11 @@ function parse(args) {
       case '--password':
         // Network password
         config.password = next(arg, args);
+        break;
+      case '-R':
+      case '--profiles':
+        // Profile server
+        config.profiles = next(arg, args);
         break;
       case '-o':
       case '--output':
@@ -484,10 +504,10 @@ function close() {
 // Parse command
 async function command(line) {
   // Expression eval?
-//  if (line.startsWith('!')) {
-//    console.log(eval(line.substr(1)));
-//    return;
-//  }
+  if (options.debug && line.startsWith('!')) {
+    console.log(eval(line.substr(1)));
+    return;
+  }
 
   // Remove comments
   line = line.split(/^\/\/+|\s\/\/+(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/)[0];
@@ -830,8 +850,8 @@ function help() {
   print('  init                                   Initialize config file');
   print('  connect                                Connect to network');
   print('  disconnect                             Disconnect from network');
+//  print('  profiles [profile] [version]           Display profile descriptors');
   print('  systems [system]                       Configure system properties');
-  print('  profiles system [-i] [profile] [ver]   Configure profile properties');
   print('  nodes system [node]                    Configure node properties');
   print('  contexts system node [context]         Configure context properties');
   print('  providers system node context profile  Configure provider properties');
@@ -904,29 +924,33 @@ async function init() {
       'CNS Host',
       'CNS Port',
       'CNS Username',
-      'CNS Password'
+      'CNS Password',
+      'CNS Profile Server'
     ], [
       config.host,
       config.port,
       config.username,
-      null//config.password
+      null,//config.password
+      config.profiles
     ]);
 
-  // Prompt to write
-  print('\nAbout to write .env file:\n');
-
-  print('CNS_HOST = ' + answers[0]);
-  print('CNS_PORT = ' + answers[1]);
-  print('CNS_USERNAME = ' + answers[2]);
-  //print('CNS_PASSWORD = ' + answers[3]);
-
-  await confirmation();
-
-  // Update new values
+  // Get answers
   config.host = answers[0];
   config.port = answers[1];
   config.username = answers[2];
   config.password = answers[3];
+  config.profiles = answers[4];
+
+  // Prompt to write
+  print('\nAbout to write .env file:\n');
+
+  print('CNS_HOST = ' + config.host);
+  print('CNS_PORT = ' + config.port);
+  print('CNS_USERNAME = ' + config.username);
+  print('CNS_PASSWORD = ' + '*'.repeat(config.password.length));
+  print('CNS_PROFILES = ' + config.profiles);
+
+  await confirmation();
 
   // Store config
   const file = path.resolve(process.cwd(), '.env');
@@ -936,7 +960,8 @@ async function init() {
     CNS_HOST: config.host,
     CNS_PORT: config.port,
     CNS_USERNAME: config.username,
-    CNS_PASSWORD: config.password
+    CNS_PASSWORD: config.password,
+    CNS_PROFILES: config.profiles
   };
 
   // Keep user settings
@@ -1067,6 +1092,7 @@ async function disconnect() {
   stats.connection = S_OFFLINE;
 
   // Reset cache
+  profiles = {};
   cache = {};
 
   // Close watcher?
@@ -1092,6 +1118,29 @@ async function disconnect() {
 
   cd();
 }
+
+// Display profile descriptors
+/*
+async function profiles(arg1, arg2) {
+  const profile = argument(arg1);
+  const version = argument(arg2);
+
+  // Display all profiles?
+  if (profile === undefined) {
+    display('profiles', await getProfiles());
+    return;
+  }
+
+  // Display profile versions?
+  if (version === undefined) {
+    display(profile, await getProfile(profile));
+    return;
+  }
+
+  // Display version properties
+  display('version' + version, await getProperties(profile, version));
+}
+*/
 
 // Configure systems
 async function systems(arg1, arg2, arg3, arg4) {
@@ -1147,91 +1196,6 @@ async function systems(arg1, arg2, arg3, arg4) {
   put(ns + 'token', token);
 
   cd(ns);
-}
-
-// Configure profile
-async function profiles(arg1, arg2, arg3) {
-  var system = required(arg1);
-  var profile = argument(arg2);
-  var version = argument(arg3);
-
-  // Install profile?
-  if (profile === '-i') {
-    // Shift params
-    profile = version;
-
-    // List descriptors?
-    if (profile === undefined) {
-      display('descriptors', await getDescriptors());
-      return;
-    }
-
-    // Send request
-    try {
-      const data = await request('GET', PROFILE_HOST + '/' + profile);
-      const descriptor = JSON.parse(data);
-
-      const title = descriptor.title || '';
-      const versions = descriptor.versions || [];
-
-      const ns = 'cns/' + system + '/profiles/' + profile + '/';
-
-      // Purge existing
-      await purge(ns + 'versions');
-      await put(ns + 'name', title);
-
-      // Update new values
-      for (var n = 0; n < versions.length; n++) {
-        const version = versions[n];
-        const properties = version.properties || [];
-
-        const v = n + 1;
-        const vs = ns + 'versions/version' + v + '/';
-
-        for (const property of properties) {
-          const ps = vs + 'properties/' + property.name + '/';
-
-          await put(ps + 'name', property.description || '');
-          await put(ps + 'provider', (property.server === null)?'yes':'no');
-          await put(ps + 'required', (property.required === null)?'yes':'no');
-          await put(ps + 'propagate', (property.propagate === null)?'yes':'no');
-        }
-        await put(vs + 'name', 'Version ' + v);
-      }
-      cd(ns);
-    } catch(e) {
-      // Failure
-      throw new Error(E_INSTALL + ': ' + e.message);
-    }
-    return;
-  }
-
-  // Must be connected
-  if (client === undefined)
-    throw new Error(E_CONNECT);
-
-  // List profiles?
-  if (profile === undefined) {
-    display('profiles', getProfiles(system));
-    return;
-  }
-
-  // Profile must exist
-  if (cache['cns/' + system + '/profiles/' + profile + '/name'] === undefined)
-    throw new Error(E_FOUND + ': ' + profile);
-
-  // List versions?
-  if (version === undefined) {
-    display(profile, getVersions(system, profile));
-    return;
-  }
-
-  // Version must exist
-  if (cache['cns/' + system + '/profiles/' + profile + '/versions/version' + version + '/name'] === undefined)
-    throw new Error(E_FOUND + ': ' + profile + ' version ' + version);
-
-  // List version properties
-  display(profile, getProperties(system, profile, version));
 }
 
 // Configure node
@@ -1381,31 +1345,23 @@ async function providers(arg1, arg2, arg3, arg4, arg5, arg6) {
     throw new Error(E_FOUND + ': ' + context);
 
   // Profile must exist
-  if (cache['cns/' + system + '/profiles/' + profile + '/name'] === undefined)
-    throw new Error(E_FOUND + ': ' + profile);
+  const properties = await getProperties(profile, version);
 
-  // Profile namespaces
+  // Provider namespace
   const ns = 'cns/' + system + '/nodes/' + node + '/contexts/' + context + '/provider/' + profile + '/';
-  const ps = 'cns/' + system + '/profiles/' + profile + '/versions/version' + version + '/properties/';
 
   // Get property values
-  const properties = [];
+  const names = [];
   const prompts = [];
   const defaults = [];
 
-  const keys = filter(cache, ps + '*/name');
+  for (const name in properties) {
+    const property = properties[name];
 
-  for (const key in keys) {
-    const parts = key.split('/');
-    const property = parts[7];
-
-    // Provider property?
-    const provider = cache[ps + property + '/provider'];
-
-    if (provider === 'yes') {
+    if (property.provider === 'yes') {
       // Add to list
-      properties.push(property);
-      prompts.push(cache[ps + property + '/name'] || property);
+      names.push(name);
+      prompts.push(property.name);
       defaults.push(cache[ns + 'properties/' + property] || '');
     }
   }
@@ -1431,8 +1387,8 @@ async function providers(arg1, arg2, arg3, arg4, arg5, arg6) {
     print('version = ' + version);
     print('scope = ' + scope);
 
-    for (var n = 0; n < properties.length; n++)
-      print(properties[n] + ' = ' + answers[n]);
+    for (var n = 0; n < names.length; n++)
+      print(names[n] + ' = ' + answers[n]);
 
     await confirmation();
   }
@@ -1441,8 +1397,8 @@ async function providers(arg1, arg2, arg3, arg4, arg5, arg6) {
   await put(ns + 'version', version);
   await put(ns + 'scope', scope);
 
-  for (var n = 0; n < properties.length; n++)
-    await put(ns + 'properties/' + properties[n], answers[n]);
+  for (var n = 0; n < names.length; n++)
+    await put(ns + 'properties/' + names[n], answers[n]);
 
   cd(ns);
 }
@@ -1473,31 +1429,24 @@ async function consumers(arg1, arg2, arg3, arg4, arg5, arg6) {
     throw new Error(E_FOUND + ': ' + context);
 
   // Profile must exist
-  if (cache['cns/' + system + '/profiles/' + profile + '/name'] === undefined)
-    throw new Error(E_FOUND + ': ' + profile);
+  const properties = await getProperties(profile, version);
 
-  // Profile namespaces
+  // Consumer namespace
   const ns = 'cns/' + system + '/nodes/' + node + '/contexts/' + context + '/consumer/' + profile + '/';
-  const ps = 'cns/' + system + '/profiles/' + profile + '/versions/version' + version + '/properties/';
 
   // Get property values
-  const properties = [];
+  const names = [];
   const prompts = [];
   const defaults = [];
 
-  const keys = filter(cache, ps + '*/name');
-
-  for (const key in keys) {
-    const parts = key.split('/');
-    const property = parts[7];
-
+  for (const name in properties) {
     // Consumer property?
-    const provider = cache[ps + property + '/provider'];
+    const property = properties[name];
 
-    if (provider !== 'yes') {
+    if (property.consumer === 'yes') {
       // Add to list
-      properties.push(property);
-      prompts.push(cache[ps + property + '/name'] || property);
+      names.push(name);
+      prompts.push(property.name);
       defaults.push(cache[ns + 'properties/' + property] || '');
     }
   }
@@ -1523,8 +1472,8 @@ async function consumers(arg1, arg2, arg3, arg4, arg5, arg6) {
     print('version = ' + version);
     print('scope = ' + scope);
 
-    for (var n = 0; n < properties.length; n++)
-      print(properties[n] + ' = ' + answers[n]);
+    for (var n = 0; n < names.length; n++)
+      print(names[n] + ' = ' + answers[n]);
 
     await confirmation();
   }
@@ -1533,8 +1482,8 @@ async function consumers(arg1, arg2, arg3, arg4, arg5, arg6) {
   await put(ns + 'version', version);
   await put(ns + 'scope', scope);
 
-  for (var n = 0; n < properties.length; n++)
-    await put(ns + 'properties/' + properties[n], answers[n]);
+  for (var n = 0; n < names.length; n++)
+    await put(ns + 'properties/' + names[n], answers[n]);
 
   cd(ns);
 }
@@ -1696,9 +1645,6 @@ function find(arg1) {
   var total = 0;
 
   for (const key in cache) {
-    // Ignore profiles
-    if (match(key, 'cns/*/profiles/*')) continue;
-
     // Has name, version or consumer?
     const t1 = key.endsWith('/name');
     const t2 = key.endsWith('/version');
@@ -1723,7 +1669,7 @@ function find(arg1) {
   }
 
   // Show found keys
-  display(total + ' found', keys);
+  display('keys', keys);
 
   // Goto result?
   if (total === 1) cd(ns);
@@ -2287,11 +2233,12 @@ function getSystems() {
 }
 
 // Get profile descriptors
-async function getDescriptors() {
+/*
+async function getProfiles() {
   if (descriptors === undefined) {
     descriptors = {};
 
-    const profiles = JSON.parse(await request('GET', PROFILE_HOST));
+    const profiles = JSON.parse(await request('GET', config.profiles));
 
     for (const profile of profiles) {
       const id = profile.name;
@@ -2302,52 +2249,70 @@ async function getDescriptors() {
   }
   return descriptors;
 }
+*/
 
-// Get system profiles
-function getProfiles(system) {
-  const profiles = {};
+// Get profile
+async function getProfile(name) {
+  // Already have it?
+  var profile = profiles[name];
 
-  const prefix = 'cns/' + system + '/profiles/*/name';
-  const keys = filter(cache, prefix);
+  if (profile === undefined) {
+    // Send request
+    try {
+      const data = JSON.parse(await request('GET', config.profiles + '/' + name));
 
-  for (const key in keys) {
-    const parts = key.split('/');
-    const profile = parts[3];
+      // Convert result
+      profile = {
+        name: data.title,
+        versions: {}
+      };
 
-    profiles[profile] = keys[key];
+      // Convert versions
+      for (var n = 0; n < data.versions.length; n++) {
+        const version = data.versions[n];
+        const properties = {};
+
+        // Convert properties
+        for (const property of version.properties) {
+          properties[property.name] = {
+            name: property.description || property.name,
+            provider: (property.server === null)?'yes':'no',
+            required: (property.required === null)?'yes':'no',
+            propagate: (property.propagate === null)?'yes':'no'
+          };
+        }
+        profile.versions['version' + (n + 1)] = properties;
+      }
+    } catch(e) {
+      // Failure
+      debug(e.message);
+      profile = null;
+    }
+
+    // Set profile cache
+    profiles[name] = profile;
   }
-  return profiles;
+
+  // Not found?
+  if (profile === null)
+    throw new Error(E_FOUND + ': ' + name);
+
+  return profile;
 }
 
-// Get profile versions
-function getVersions(system, profile) {
-  const versions = {};
+// Get profile properties
+async function getProperties(name, version) {
+  // Get profile descriptor
+  const profile = await getProfile(name);
 
-  const prefix = 'cns/' + system + '/profiles/' + profile + '/versions/*/name';
-  const keys = filter(cache, prefix);
+  // Get properties
+  const versions = profile.versions || [];
+  const properties = versions['version' + version];
 
-  for (const key in keys) {
-    const parts = key.split('/');
-    const version = parts[5];
+  // Missing version?
+  if (properties === undefined)
+    throw new Error(E_FOUND + ': ' + name + ' v' + version);
 
-    versions[version] = keys[key];
-  }
-  return versions;
-}
-
-// Get profile version properties
-function getProperties(system, profile, version) {
-  const properties = {};
-
-  const prefix = 'cns/' + system + '/profiles/' + profile + '/versions/version' + version + '/properties/*/name';
-  const keys = filter(cache, prefix);
-
-  for (const key in keys) {
-    const parts = key.split('/');
-    const version = parts[7];
-
-    properties[version] = keys[key];
-  }
   return properties;
 }
 
@@ -2785,7 +2750,7 @@ function print(text) {
 
 // Log debug to console
 function debug(text) {
-  if (options.debug && !transmit(text + '\n'))
+  if (options.debug && pipe === undefined) // && !transmit(text + '\n'))
     console.debug(text.magenta);
 }
 

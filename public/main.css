@@ -805,6 +805,7 @@ dialog > form > button {
 
 dialog > form > button:last-of-type {
   float: right;
+  margin-bottom: 16px;
 }
 
 /* Attributes */

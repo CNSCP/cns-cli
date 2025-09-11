@@ -1,23 +1,15 @@
 // main.js - CNS Dashboard
 // Copyright 2025 Padi, Inc. All Rights Reserved.
 
-// add hilight attribute on change
-// open if name = new something (also stick at top)
-// do some help
-// node search (contexts etc...) (add big list, then filter + expand)
-// capability version change remove watch?
-
 // Application
 
 const app = (function() {
 
-// Message icons
+// Messages
 
 const INFO = 'info';
 const WARN = 'warning';
 const ERROR = 'error';
-
-// Messages
 
 const M_CONNECTED = 'Dashboard connected';
 const M_DISCONNECTED = 'Dashboard disconnected';
@@ -26,7 +18,9 @@ const M_OFFLINE = 'Network offline';
 const M_EXECUTE = 'Console command';
 const M_COMMAND = 'Command error';
 
-// Constants
+const MAX_MESSAGES = 32;
+
+// Palette
 
 const PALETTE = [
   '#66c5cc',
@@ -39,18 +33,14 @@ const PALETTE = [
   '#b3b3b3'
 ];
 
-const MAX_MESSAGES = 32;
-
 // Local data
 
 var client;
 
-//var descriptors;
 var messages;
 var expanded;
 
 var dialog;
-var syscrap;
 
 // Event handlers
 
@@ -73,9 +63,6 @@ function oninit() {
 
     hidden('#disconnected', true);
     hidden('#connected', false);
-
-    // Fetch profile descriptors
-//    getDescriptors();
   })
   // Client update
   .on('update', (data) => {
@@ -195,15 +182,6 @@ function onclick(e) {
       // Message list
       message();
       break;
-//    case 'profiles-link':
-//      // View profile
-//      window.open(key);
-//      break;
-//    case 'profiles-install':
-//    case 'profiles-remove':
-//      // Profiles list
-//      install(element, key, val);
-//      break;
     case 'systems-add':
     case 'systems-remove':
       // Systems list
@@ -269,11 +247,6 @@ function onchange(e) {
       if (element.checkValidity())
         command('put', key, val);
       break;
-    case 'caps-dialog-profile':
-      // Caps profile change
-      const versions = selectVersions(syscrap, value('#caps-dialog-version'), val);
-      html('#caps-dialog-version', versions);
-      break;
   }
 }
 
@@ -287,10 +260,6 @@ function onsubmit(e) {
 
   // Submit what?
   switch (id) {
-//    case 'profiles-form':
-//      // Profiles search
-//      focus('#profiles-search');
-//      break;
     case 'systems-form':
       // Systems search
       focus('#systems-search');
@@ -414,7 +383,7 @@ function message(icon, text) {
 }
 
 // Update changes
-function update(data) {
+async function update(data) {
   const stats = client.stats;
   const isOnline = (stats.connection === 'online');
 
@@ -428,11 +397,8 @@ function update(data) {
       const online = $$('[online]');
       const offline = $$('[offline]');
 
-      for (const e of online)
-        hidden(e, !isOnline);
-
-      for (const e of offline)
-        hidden(e, isOnline);
+      for (const e of online) hidden(e, !isOnline);
+      for (const e of offline) hidden(e, isOnline);
 
       message(isOnline?INFO:ERROR, isOnline?M_ONLINE:M_OFFLINE);
     }
@@ -498,30 +464,29 @@ function update(data) {
         }
 
         // Capability version change?
-        if (/*key.startsWith('cns/network/nodes/') &&*/ key.endsWith('/version')) {
+        if (key.endsWith('/version'))
           rebuild = true;
-//          break;
-        }
 
         // Element exists?
         const elements = $$('[data-key="' + key + '"]');
 
-        if (elements.length === 0) {
+        if (elements.length === 0)
           rebuild = true;
-//          break;
-        }
 
         // Update elements
         for (const element of elements) {
           // What type?
           switch (tag(element)) {
             case 'button':
+              // Ignore
               break;
             case 'input':
             case 'select':
+              // Set new value
               value(element, change);
               break;
             default:
+              // Set new text
               text(element, change);
               break;
           }
@@ -596,7 +561,7 @@ function listWatchers() {
       const key = parts.join('/');
       const ps = conns[conn];
 
-      const value = client.get(key, property);
+      const value = client.get(key, '');
 
       list +=
         '<dd id="watchers-add" data-type="' + display + '" data-key="' + from + '" data-val="on"' + style + '>' +
@@ -669,207 +634,6 @@ function listMessages() {
   return list;
 }
 
-/*
-// Generate profiles list
-function listProfiles() {
-  const ns = 'cns/network/profiles/';
-
-  var list = '';
-  var total = 0;
-
-  const search = value('#profiles-search');
-  const wildcard = '*' + search + '*';
-
-  const profiles = {};
-
-  // Add profile descriptors
-  if (search !== '' && descriptors) {
-    for (const id in descriptors) {
-      const name = descriptors[id];
-
-      if (match(id, wildcard) || match(name, wildcard)) {
-        profiles[id] = {
-          install: true,
-          name: name
-        };
-      }
-    }
-  }
-
-  // Add installed profiles*/
-//  const installed = client.select(ns + '*/name');
-/*
-  for (const profile in installed) {
-    const parts = profile.split('/');
-
-    const id = parts[3];
-    const name = installed[profile];
-
-    if (match(id, wildcard) || match(name, wildcard)) {
-      profiles[id] = {
-        install: false,
-        name: name
-      };
-    }
-  }
-
-  const order = Object.keys(profiles).sort();
-
-  for (const id of order) {
-    const profile = profiles[id];
-
-    const install = profile.install;
-    const name = profile.name;
-
-    const key = ns + id;
-    const readonly = install?' readonly':'';
-
-    const expand = install?
-      '<button id="profiles-link" data-key="https://cp.padi.io/profiles/' + id + '" data-tip="View Profile" data-pos="right" icon primary><i>link</i></button>':
-      '<button id="profiles-expand" data-key="' + key + '" icon primary><i>' + isExpanded(key) + '</i></button>';
-
-    const action = install?
-      '<button id="profiles-install" data-val="' + id + '" data-tip="Install Profile" data-pos="left" icon primary><i>download</i></button>':
-      '<button id="profiles-remove" data-key="' + key + '" data-val="' + id + '" data-tip="Remove Profile" data-pos="left" icon primary><i>delete</i></button>';
-
-    list +=
-      '<tr ' + readonly + '>' +
-        '<td>' + expand + '</td>' +
-        '<td>' + id + '</td>' +
-        '<td' + (install?'':' data-key="' + key + '/name"') + '>' + name + '</td>' +
-        '<td>' + action + '</td>' +
-      '</tr>';
-
-    if (!install) {
-      list +=
-        '<tr expand' + isHidden(key) + '>' +
-          '<td></td>' +
-          '<td colspan="3">' +
-            listVersions(id) +
-          '</td>' +
-        '</tr>';
-    }
-    total++;
-  }
-
-  const caption = '<caption>' + pluralize(total, 'Profile', 'Profiles') + ' found</caption>';
-
-  return '<table>' +
-      '<tr>' +
-        '<th><i>extension</i></th>' +
-        '<th>Profile</th>' +
-        '<th>Name</th>' +
-        '<th></th>' +
-      '</tr>' +
-      list +
-      caption +
-    '</table>';
-}
-*/
-/*
-// Generate profile versions
-function listVersions(profile) {
-  const ns = 'cns/network/profiles/' + profile + '/versions/';
-
-  var list = '';
-  var total = 0;
-*/
-//  const versions = client.select(ns + '*/name');
-/*  const order = Object.keys(versions).sort();
-
-  for (const version of order) {
-    const parts = version.split('/');
-
-    const id = parts[5];
-    const name = versions[version];
-
-    const key = ns + id;
-    const expand = '<button id="versions-expand" data-key="' + key + '" icon primary><i>' + isExpanded(key) + '</i></button>';
-
-    list +=
-      '<tr>' +
-        '<td>' + expand + '</td>' +
-        '<td>' + name + '</td>' +
-        '<td></td>' +
-      '</tr>' +
-      '<tr expand' + isHidden(key) + '>' +
-        '<td></td>' +
-        '<td colspan="2">' +
-          listProperties(profile, id) +
-        '</td>' +
-      '</tr>';
-
-    total++;
-  }
-
-  const caption = '<caption>' + pluralize(total, 'Version', 'Versions') + ' found</caption>';
-
-  return '<table>' +
-      '<tr>' +
-        '<th><i>style</i></th>' +
-        '<th>Version</th>' +
-        '<th></th>' +
-      '</tr>' +
-      list +
-      caption +
-    '</table>';
-}
-*/
-
-/*
-// Generate profile properties
-function listProperties(profile, version) {
-  const ns = 'cns/network/profiles/' + profile + '/versions/' + version + '/properties/';
-
-  var list = '';
-  var total = 0;
-*/
-//  const properties = client.select(ns + '*/name');
-/*  const order = Object.keys(properties).sort();
-
-  for (const property of order) {
-    const parts = property.split('/');
-
-    const id = parts[7];
-    const name = properties[property];
-
-    const key = ns + id;
-
-    const provider = client.get(key + '/provider', 'no');
-    const required = client.get(key + '/required', 'no');
-    const propagate = client.get(key + '/propagate', 'no');
-
-    list +=
-      '<tr>' +
-        '<td><i>label</i></td>' +
-        '<td>' + id + '</td>' +
-        '<td data-key="' + key + '/name">' + name + '</td>' +
-        '<td data-key="' + key + '/provider" align="center" capitalize>' + provider + '</td>' +
-        '<td data-key="' + key + '/required" align="center" capitalize>' + required + '</td>' +
-        '<td data-key="' + key + '/propagate" align="center" capitalize>' + propagate + '</td>' +
-        '<td></td>' +
-      '</tr>';
-
-    total++;
-  }
-
-  const caption = '<caption>' + pluralize(total, 'Property', 'Properties') + ' found</caption>';
-
-  return '<table>' +
-      '<tr>' +
-        '<th><i>dataset</i></th>' +
-        '<th>Property</th>' +
-        '<th>Name</th>' +
-        '<th>Provider</th>' +
-        '<th>Required</th>' +
-        '<th>Propagate</th>' +
-        '<th></th>' +
-      '</tr>' +
-      list +
-      caption +
-    '</table>';
-}*/
-
 // Generate systems list
 function listSystems() {
   const ns = 'cns/';
@@ -919,7 +683,7 @@ function listSystems() {
                 '<option value="bysystem"' + isSelected(orchestrator, 'bysystem') + '>By System</option>' +
               '</select>' +
               '<label>System token</label>' +
-              '<input id="system-token" type="text" value="' + token + '" maxlength="128" data-key="' + key + '/token" placeholder="" readonly/>' +
+              '<input id="system-token" type="text" value="' + token + '" maxlength="128" data-key="' + key + '/token" readonly/>' +
             '</form>' +
             listNodes(id) +
           '</td>' +
@@ -989,7 +753,7 @@ function listNodes(system) {
               '<option value="no"' + isSelected(upstream, 'no') + '>No</option>' +
             '</select>' +
             '<label>Node token</label>' +
-            '<input id="node-token" type="text" value="' + token + '" maxlength="128" data-key="' + key + '/token" placeholder="" readonly/>' +
+            '<input id="node-token" type="text" value="' + token + '" maxlength="128" data-key="' + key + '/token" readonly/>' +
           '</form>' +
           listContexts(system, id) +
         '</td>' +
@@ -1051,7 +815,7 @@ function listContexts(system, node) {
             '<label>Context name</label>' +
             '<input id="context-name" type="text" value="' + name + '" maxlength="128" data-key="' + key + '/name" placeholder="New Context"/>' +
             '<label>Context token</label>' +
-            '<input id="context-token" type="text" value="' + token + '" maxlength="128" data-key="' + key + '/token" placeholder="" readonly/>' +
+            '<input id="context-token" type="text" value="' + token + '" maxlength="128" data-key="' + key + '/token" readonly/>' +
           '</form>' +
           listCaps(system, node, id) +
         '</td>' +
@@ -1112,11 +876,9 @@ function listCaps(system, node, context) {
         '<td colspan="5">' +
           '<form id="cap-form">' +
             '<label>Capability version</label>' +
-            '<select id="cap-version" value="' + version + '" data-key="' + key + '/version">' +
-              selectVersions(system, version, id) +
-            '</select>' +
+            '<input id="cap-version" type="text" value="' + version + '" maxlength="1" pattern="[1-9]" data-key="' + key + '/version"/>' +
             '<label>Capability scope</label>' +
-            '<input id="cap-scope" type="text" value="' + scope + '" maxlength="128" data-key="' + key + '/scope" placeholder=""/>' +
+            '<input id="cap-scope" type="text" value="' + scope + '" maxlength="128" data-key="' + key + '/scope"/>' +
             formDefaults(system, node, context, role, id, version) +
           '</form>' +
           listConns(system, node, context, role, id, version) +
@@ -1230,6 +992,9 @@ function listKeys() {
     const parts = key.split('/');
     const value = keys[key];
 
+    // Ignore profiles
+//    if ()
+
     if (!wildcard || match(key, wildcard) || match(value, wildcard)) {
       const id = parts[parts.length - 1];
 
@@ -1247,7 +1012,7 @@ function listKeys() {
           '<td colspan="2">' +
             '<form id="node-form">' +
               '<label>Key value</label>' +
-              '<input id="key-value" type="text" value="' + value + '" data-key="' + key + '" placeholder=""/>' +
+              '<input id="key-value" type="text" value="' + value + '" data-key="' + key + '"/>' +
             '</form>' +
           '</td>' +
         '</tr>';
@@ -1272,67 +1037,52 @@ function listKeys() {
 
 // Generate defaults form
 function formDefaults(system, node, context, role, profile, version) {
-  const ns = 'cns/' + system + '/nodes/' + node + '/contexts/' + context + '/' + role + '/' + profile + '/properties/';
-  const ps = 'cns/' + system + '/profiles/' + profile + '/versions/version' + version + '/properties/';
-
   var form = '';
 
-  const properties = client.select(ps + '*/name');
+  const ns = 'cns/' + system + '/nodes/' + node + '/contexts/' + context + '/' + role + '/' + profile + '/properties/';
+
+  const properties = client.select(ns + '*');
   const order = Object.keys(properties).sort();
 
   for (const property of order) {
     const parts = property.split('/');
 
-    const id = parts[7];
-    const name = properties[property];
+    const name = parts[9];
+    const value = properties[property];
 
-    const provider = client.get(ps + id + '/provider', '');
-
-    switch (role) {
-      case 'provider': if (provider !== 'yes') continue; break;
-      case 'consumer': if (provider !== 'no') continue; break;
-    }
-
-    const key = ns + id;
-    const value = client.get(key, '');
+    const key = ns + name;
 
     form +=
-      '<label>Capability ' + id + '</label>' +
-      '<input id="cap-default" type="text" value="' + value + '" data-key="' + key + '" placeholder="' + name + '"/>';
+      '<label>Capability ' + name + '</label>' +
+      '<input id="cap-default" type="text" value="' + value + '" data-key="' + key + '"/>';
   }
   return form;
 }
-// combine these two
+
 // Generate properties form
 function formProperties(system, node, context, role, profile, version, conn) {
-  const ns = 'cns/' + system + '/nodes/' + node + '/contexts/' + context + '/' + role + '/' + profile + '/connections/' + conn + '/properties/';
-  const ps = 'cns/' + system + '/profiles/' + profile + '/versions/version' + version + '/properties/';
-
   var form = '';
 
-  const properties = client.select(ps + '*/name');
+  const ps = 'cns/' + system + '/nodes/' + node + '/contexts/' + context + '/' + role + '/' + profile + '/properties/';
+  const ns = 'cns/' + system + '/nodes/' + node + '/contexts/' + context + '/' + role + '/' + profile + '/connections/' + conn + '/properties/';
+
+  const valid = client.select(ps + '*');
+  const properties = client.select(ns + '*');
+
   const order = Object.keys(properties).sort();
 
   for (const property of order) {
     const parts = property.split('/');
 
-    const id = parts[7];
-    const name = properties[property];
+    const name = parts[11];
+    const value = properties[property];
 
-    const provider = client.get(ps + id + '/provider', '');
-    var readonly = '';
-
-    switch (role) {
-      case 'provider': if (provider !== 'yes') readonly = ' readonly'; break;
-      case 'consumer': if (provider !== 'no') readonly = ' readonly'; break;
-    }
-
-    const key = ns + id;
-    const value = client.get(key, '');
+    const readonly = valid[ps + name]?'':' readonly';
+    const key = ns + name;
 
     form +=
-      '<label>Connection ' + id + '</label>' +
-      '<input id="conn-property" type="text" value="' + value + '" data-key="' + key + '" placeholder="' + name + '"' + readonly + '/>';
+      '<label>Connection ' + name + '</label>' +
+      '<input id="conn-property" type="text" value="' + value + '" data-key="' + key + '"' + readonly + '/>';
   }
 
   if (form !== '') {
@@ -1346,81 +1096,6 @@ function formProperties(system, node, context, role, profile, version, conn) {
   }
   return form;
 }
-
-// Set profile select items
-function selectProfiles(system, current) {
-  var options = '';
-
-  const profiles = client.select('cns/' + system + '/profiles/*/name');
-  const order = Object.keys(profiles).sort();
-
-  for (const profile of order) {
-    const parts = profile.split('/');
-    const id = parts[3];
-
-    const selected = ((current === '' && options === '') || id === current)?' selected':'';
-    options += '<option value="' + id + '"' + selected + '>' + id + '</option>';
-  }
-  return options;
-}
-
-// Set version select items
-function selectVersions(system, current, profile) {
-  var options = '';
-
-  const versions = client.select('cns/' + system + '/profiles/' + profile + '/versions/*/name');
-  const order = Object.keys(versions).sort();
-
-  for (const version of order) {
-    const parts = version.split('/');
-    const id = parts[5].replace('version', '');
-
-    const selected = ((current === '' && options === '') || id === current)?' selected':'';
-    options += '<option value="' + id + '"' + selected + '>' + id + '</option>';
-  }
-  return options;
-}
-
-// Set property select items
-function selectProperties(current, key) {
-  const parts = key.split('/');
-
-  const system = parts[1];
-  const profile = parts[7];
-  const version = client.get(key + '/version');
-
-  var options = '';
-
-  const properties = client.select('cns/' + system + '/profiles/' + profile + '/versions/version' + version + '/properties/*/name');
-  const order = Object.keys(properties).sort();
-
-  for (const property of order) {
-    const parts = property.split('/');
-    const id = parts[7];
-
-    const selected = ((current === '' && options === '') || id === current)?' selected':'';
-    options += '<option value="' + id + '"' + selected + '>' + id + '</option>';
-  }
-  return options;
-}
-
-/*
-// Show install dialog
-function install(element, key, val) {
-  // Remove profile
-  if (key) return purge(element, 'Profile', key, val);
-
-  // Confirm install
-  return confirm('About To Install Profile', val)
-  .then((result) => {
-    // Confirmed?
-    if (result) {
-      disabled(element, true);
-      return command('profiles', '-i', val);
-    }
-  });
-}
-*/
 
 // Show systems dialog
 function systems(element, key, val) {
@@ -1492,12 +1167,6 @@ function capability(element, key, val) {
   const node = parts[1];
   const context = parts[2];
 
-  syscrap = system;
-
-  // Fill profiles list
-  html('#caps-dialog-profile', selectProfiles(system, value('#caps-dialog-profile')));
-  html('#caps-dialog-version', selectVersions(system, value('#caps-dialog-version'), value('#caps-dialog-profile')));
-
   // Show dialog
   return show('#caps-dialog')
   .then((result) => {
@@ -1534,7 +1203,7 @@ function watcher(element, key, val) {
   const property = parts[0];
   const display = parts[1];
 
-  html('#watcher-dialog-property', selectProperties(property, key));
+  value('#watcher-dialog-property', property);
   value('#watcher-dialog-display', display);
 
   // Show dialog
@@ -1575,7 +1244,7 @@ function keys(element, key, val) {
 // Show purge dialog
 function purge(element, type, key, val) {
   // Confirm action
-  return confirm('About To Remove ' + type, val)
+  return confirm('Remove ' + type, val)
   .then((result) => {
     // Confirmed?
     if (result) {
@@ -1589,8 +1258,17 @@ function purge(element, type, key, val) {
 function confirm(prompt, val) {
   text('#confirm-dialog h1 span', prompt);
   text('#confirm-dialog p', val);
+  text('#confirm-dialog h4:first-of-type', 'About to ' + prompt.toLowerCase() + '!');
 
   return show('#confirm-dialog');
+}
+
+// Show error dialog
+function error(message, reason) {
+  text('#error-dialog p', message);
+  text('#error-dialog h4:last-of-type', reason);
+
+  return show('#error-dialog');
 }
 
 // Show dialog
@@ -1656,24 +1334,14 @@ async function command(cmd, ...args) {
   const format = packet.format;
   const response = packet.response;
 
-  if (response.error)
-    message(ERROR, M_COMMAND + ': ' + response.error);
+  const err = response.error;
 
+  if (err) {
+    message(ERROR, M_COMMAND + ': ' + err);
+    await error(err, 'While executing \'' + cmd + '\' command.');
+  }
   return packet.response;
 }
-
-// Get profile descriptors
-/*async function getDescriptors() {
-  // Already fetched?
-  if (descriptors !== undefined) return;
-
-  descriptors = {};
-
-  const response = await command('profiles', '-i');
-  descriptors = response.descriptors;
-
-  html('#profiles-list', listProfiles());
-}*/
 
 // String functions
 
@@ -1920,18 +1588,5 @@ document.onkeyup = onkeyup;
 document.onclick = onclick;
 document.onchange = onchange;
 document.onsubmit = onsubmit;
-
-/*
-// Exports
-// debug
-return {
-  focus: focus,
-  toggle: toggle,
-  attribute: attribute,
-  command: command,
-  $: $,
-  $$: $$
-};
-*/
 
 }());

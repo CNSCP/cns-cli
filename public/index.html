@@ -47,55 +47,6 @@
         <aside id="watchers-list" online hidden></aside>
         <aside id="messages-list"></aside>
       </section>
-<!--
-      <section view="systems" hidden>
-        <h1>Network<button id="help" data-tip="Help" data-pos="left" icon primary><i>live_help</i></button></h1>
-        <aside hidden>
-          <div>
-            <h4>Did you know?</h4>
-            <ul>
-              <li>Some help here...</li>
-            </ul>
-          </div>
-        </aside>
-        <aside offline hidden><i>wifi_off</i>Network connection is currently offline</aside>
-        <aside online hidden>
-          <form id="network-form">
-            <label>Network name</label>
-            <input id="network-name" type="text" maxlength="128" data-key="cns/network/name" placeholder="New Network" autofocus/>
-            <label>Network orchestrator</label>
-            <select id="network-orchestrator" data-key="cns/network/orchestrator">
-              <option value="allsystems">All Systems</option>
-              <option value="bysystem">By System</option>
-            </select>
-            <label>Network token</label>
-            <input id="network-token" maxlength="128" data-key="cns/network/token" type="text" placeholder="" readonly/>
-          </form>
-        </aside>
-      </section>
--->
-<!--
-      <section view="profiles" hidden>
-        <h1>Profiles<button id="help" data-tip="Help" data-pos="left" icon primary><i>live_help</i></button></h1>
-        <aside hidden>
-          <div>
-            <h4>Did you know?</h4>
-            <ul>
-              <li>Some help here...</li>
-            </ul>
-          </div>
-        </aside>
-        <aside offline hidden><i>wifi_off</i>Network connection is currently offline</aside>
-        <aside online hidden>
-          <form id="profiles-form">
-            <label>Search profiles</label>
-            <input id="profiles-search" type="text" maxlength="128" placeholder="profile or name" autofocus/>
-            <button id="profiles-enter" icon primary><i>keyboard_return</i></button>
-          </form>
-        </aside>
-        <aside id="profiles-list" online hidden></aside>
-      </section>
--->
       <section view="systems" hidden>
         <h1>Systems<button id="help" data-tip="Help" data-pos="left" icon primary><i>live_help</i></button></h1>
         <aside hidden>
@@ -110,7 +61,7 @@
         <aside online hidden>
           <form id="systems-form">
             <label>Search systems</label>
-            <input id="systems-search" type="text" maxlength="128" placeholder="Identifier or name" autofocus/>
+            <input id="systems-search" type="text" maxlength="128" placeholder="System or name" autofocus/>
             <button id="systems-enter" icon primary><i>keyboard_return</i></button>
           </form>
         </aside>
@@ -214,11 +165,11 @@
           <option value="consumers">Consumer</option>
         </select>
         <label>Capability profile</label>
-        <select id="caps-dialog-profile" required></select>
+        <input id="caps-dialog-profile" type="text" maxlength="128"/>
         <label>Capability version</label>
-        <select id="caps-dialog-version" required></select>
+        <input id="caps-dialog-version" type="text" maxlength="1" pattern="[1-9]"/>
         <label>Capability scope</label>
-        <input id="caps-dialog-scope" type="text" maxlength="128" placeholder=""/>
+        <input id="caps-dialog-scope" type="text" maxlength="128"/>
         <button id="caps-dialog-ok" primary raised>Add</button>
         <button id="caps-dialog-cancel" raised>Cancel</button>
       </form>
@@ -227,7 +178,7 @@
       <h1>Add Watcher<button id="watcher-dialog-close" icon primary><i>close</i></button></h1>
       <form id="watcher-dialog-form">
         <label>Watch property</label>
-        <select id="watcher-dialog-property" autofocus required></select>
+        <input id="watcher-dialog-property" type="text" maxlength="128" autofocus/>
         <label>Watch display</label>
         <select id="watcher-dialog-display" required>
           <option value="value" selected>Value</option>
@@ -243,7 +194,7 @@
         <label>Key identifier</label>
         <input id="keys-dialog-key" type="text" maxlength="128" pattern="[A-Za-z0-9\/\.]*" placeholder="cns/system/example" autofocus required/>
         <label>Key value</label>
-        <input id="keys-dialog-value" type="text" maxlength="128" placeholder=""/>
+        <input id="keys-dialog-value" type="text" maxlength="128"/>
         <button id="keys-dialog-ok" primary raised>Add</button>
         <button id="keys-dialog-cancel" raised>Cancel</button>
       </form>
@@ -251,10 +202,20 @@
     <dialog id="confirm-dialog" closeby="none">
       <h1><span>Title</span><button id="confirm-dialog-close" icon primary><i>close</i></button></h1>
       <form id="confirm-dialog-form">
+        <h4>Action</h4>
         <p>Message</p>
         <h4>Is this OK?</h4>
         <button id="confirm-dialog-ok" primary raised>Yes</button>
         <button id="confirm-dialog-cancel" raised autofocus>No</button>
+      </form>
+    </dialog>
+    <dialog id="error-dialog" closeby="none">
+      <h1><span>CNS Error</span><button id="error-dialog-close" icon primary><i>close</i></button></h1>
+      <form id="error-dialog-form">
+        <h4>An error has occurred!</h4>
+        <p>Message</p>
+        <h4>Reason</h4>
+        <button id="error-dialog-ok" primary raised>OK</button>
       </form>
     </dialog>
     <footer>Connecting...</footer>
