@@ -1443,7 +1443,7 @@ async function consumers(arg1, arg2, arg3, arg4, arg5, arg6) {
     // Consumer property?
     const property = properties[name];
 
-    if (property.consumer === 'yes') {
+    if (property.provider === 'no') {
       // Add to list
       names.push(name);
       prompts.push(property.name);
