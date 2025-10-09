@@ -180,6 +180,8 @@ var variables;
 
 var server;
 var wss;
+
+var calls;
 var pipe;
 var buffer;
 
@@ -1211,8 +1213,8 @@ async function nodes(arg1, arg2, arg3, arg4, arg5) {
   var token = argument(arg5, '$uuid');
 
   // System must exist
-  if (cache['cns/' + system + '/name'] === undefined)
-    throw new Error(E_FOUND + ': ' + node);
+  if (!await exists('cns/' + system + '/name'))
+    throw new Error(E_FOUND + ': ' + system);
 
   // Node namespace
   const ns = 'cns/' + system + '/nodes/' + node + '/';
@@ -1272,11 +1274,11 @@ async function contexts(arg1, arg2, arg3, arg4, arg5) {
   var token = argument(arg5, '$uuid');
 
   // System must exist
-  if (cache['cns/' + system + '/name'] === undefined)
-    throw new Error(E_FOUND + ': ' + node);
+  if (!await exists('cns/' + system + '/name'))
+    throw new Error(E_FOUND + ': ' + system);
 
   // Node must exist
-  if (cache['cns/' + system + '/nodes/' + node + '/name'] === undefined)
+  if (!await exists('cns/' + system + '/nodes/' + node + '/name'))
     throw new Error(E_FOUND + ': ' + node);
 
   // Context namespace
@@ -1333,15 +1335,15 @@ async function providers(arg1, arg2, arg3, arg4, arg5, arg6) {
   var scope = argument(arg6, '');
 
   // System must exist
-  if (cache['cns/' + system + '/name'] === undefined)
-    throw new Error(E_FOUND + ': ' + node);
+  if (!await exists('cns/' + system + '/name'))
+    throw new Error(E_FOUND + ': ' + system);
 
   // Node must exist
-  if (cache['cns/' + system + '/nodes/' + node + '/name'] === undefined)
+  if (!await exists('cns/' + system + '/nodes/' + node + '/name'))
     throw new Error(E_FOUND + ': ' + node);
 
   // Context must exist
-  if (cache['cns/' + system + '/nodes/' + node + '/contexts/' + context + '/name'] === undefined)
+  if (!await exists('cns/' + system + '/nodes/' + node + '/contexts/' + context + '/name'))
     throw new Error(E_FOUND + ': ' + context);
 
   // Profile must exist
@@ -1417,15 +1419,15 @@ async function consumers(arg1, arg2, arg3, arg4, arg5, arg6) {
   var scope = argument(arg6, '');
 
   // System must exist
-  if (cache['cns/' + system + '/name'] === undefined)
-    throw new Error(E_FOUND + ': ' + node);
+  if (!await exists('cns/' + system + '/name'))
+    throw new Error(E_FOUND + ': ' + system);
 
   // Node must exist
-  if (cache['cns/' + system + '/nodes/' + node + '/name'] === undefined)
+  if (!await exists('cns/' + system + '/nodes/' + node + '/name'))
     throw new Error(E_FOUND + ': ' + node);
 
   // Context must exist
-  if (cache['cns/' + system + '/nodes/' + node + '/contexts/' + context + '/name'] === undefined)
+  if (!await exists('cns/' + system + '/nodes/' + node + '/contexts/' + context + '/name'))
     throw new Error(E_FOUND + ': ' + context);
 
   // Profile must exist
@@ -1489,7 +1491,7 @@ async function consumers(arg1, arg2, arg3, arg4, arg5, arg6) {
 }
 
 // Display profile connections
-function connections(arg1, arg2, arg3, arg4, arg5) {
+async function connections(arg1, arg2, arg3, arg4, arg5) {
   // Must be connected
   if (client === undefined)
     throw new Error(E_CONNECT);
@@ -2377,6 +2379,20 @@ function getCapabilities(system, node, context, role) {
   return profiles;
 }
 
+// Key exists?
+async function exists(key) {
+  // Try to get value
+  const value = await client.get(key)
+    .string()
+    .catch((e) => {
+      // Failure
+      throw new Error(E_GET + ': ' + e.message);
+    });
+
+  // Value exists?
+  return value !== null;
+}
+
 // Filter keys
 function filter(keys, filter) {
   const result = {};
@@ -2473,6 +2489,8 @@ function start(host, port) {
 
 // Receive socket command
 async function receive(ws, packet) {
+  calls++;
+
   try {
     const data = JSON.parse(packet);
 
@@ -2493,6 +2511,9 @@ async function receive(ws, packet) {
     }
 
     // Pipe to socket
+    var oldpipe = pipe;
+    var oldbuffer = buffer;
+
     pipe = ws;
     buffer = '';
 
@@ -2519,8 +2540,8 @@ async function receive(ws, packet) {
     });
 
     // Restore pipe
-    pipe = undefined;
-    buffer = undefined;
+    pipe = oldpipe;//undefined;
+    buffer = oldbuffer;//undefined;
 
     if (format)
       options.format = oldformat;
@@ -2536,6 +2557,7 @@ async function receive(ws, packet) {
 
     error(e);
   }
+  calls--;
 }
 
 // Update key value
@@ -2750,7 +2772,7 @@ function print(text) {
 
 // Log debug to console
 function debug(text) {
-  if (options.debug && pipe === undefined) // && !transmit(text + '\n'))
+  if (options.debug)// && pipe === undefined) // && !transmit(text + '\n'))
     console.debug(text.magenta);
 }
 
