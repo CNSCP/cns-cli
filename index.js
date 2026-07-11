@@ -1048,6 +1048,12 @@ async function connect() {
   watcher.on('connected', () => {
     // Re-connect
     debug('Connected...');
+
+    stats.connection = S_ONLINE;
+
+    broadcast({
+      stats: { connection: S_ONLINE }
+    });
   })
     .on('put', (change) => {
       // Key put
@@ -1072,6 +1078,12 @@ async function connect() {
     .on('disconnected', () => {
       // Broken connection
       debug('Disconnected...');
+
+      stats.connection = S_OFFLINE;
+
+      broadcast({
+        stats: { connection: S_OFFLINE }
+      });
     })
     .on('error', (e) => {
       // Failure

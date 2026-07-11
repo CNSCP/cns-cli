@@ -17,6 +17,7 @@ const M_ONLINE = 'Network online';
 const M_OFFLINE = 'Network offline';
 const M_EXECUTE = 'Console command';
 const M_COMMAND = 'Command error';
+const M_RECONNECT = 'Reconnecting to network';
 
 const MAX_MESSAGES = 32;
 
@@ -181,6 +182,10 @@ function onclick(e) {
     case 'messages-clear':
       // Message list
       message();
+      break;
+    case 'reconnect':
+      // Reconnect network
+      reconnect();
       break;
     case 'systems-add':
     case 'systems-remove':
@@ -1325,6 +1330,12 @@ async function execute(cmd) {
   text = escapeHtml(text);
 
   if (text !== '') html('#command-response', '<pre>' + text + '</pre>');
+}
+
+// Reconnect to network
+async function reconnect() {
+  message(INFO, M_RECONNECT);
+  return command('connect');
 }
 
 // Transmit command to host
