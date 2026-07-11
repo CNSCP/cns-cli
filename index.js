@@ -64,11 +64,11 @@ const S_OFFLINE = 'offline';
 
 // Constants
 
-const DATE_SHORT = {day: '2-digit', month: '2-digit', year: 'numeric'};
-const DATE_LONG = {weekday: 'short', day: 'numeric', month: 'short', year: 'numeric'};
+const DATE_SHORT = { day: '2-digit', month: '2-digit', year: 'numeric' };
+const DATE_LONG = { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' };
 
-const TIME_SHORT = {hour: '2-digit', minute: '2-digit'};
-const TIME_LONG = {hour: 'numeric', minute: '2-digit', hour12: true};
+const TIME_SHORT = { hour: '2-digit', minute: '2-digit' };
+const TIME_LONG = { hour: 'numeric', minute: '2-digit', hour12: true };
 
 // Defaults
 
@@ -77,7 +77,8 @@ const defaults = {
   port: '2379',
   username: '',
   password: '',
-  profiles: 'https://cp.padi.io/profiles'
+  profiles: 'https://cp.padi.io/profiles',
+  connect_timeout: '10000',
 };
 
 // Configuration
@@ -87,7 +88,9 @@ const config = {
   port: process.env.CNS_PORT || defaults.port,
   username: process.env.CNS_USERNAME || defaults.username,
   password: process.env.CNS_PASSWORD || defaults.password,
-  profiles: process.env.CNS_PROFILES || defaults.profiles
+  profiles: process.env.CNS_PROFILES || defaults.profiles,
+  connect_timeout: parseInt(process.env.CONNECT_TIMEOUT || defaults.connect_timeout),
+  secureDashboard: process.env.SECURE_DASHBOARD || defaults.secureDashboard
 };
 
 // Options
@@ -99,7 +102,7 @@ const options = {
   columns: 0,
   rows: 0,
   silent: false,
-  debug: false
+  debug: process.env.DEBUG || false
 };
 
 // Stats
@@ -124,7 +127,7 @@ const commands = {
   'init': init,
   'connect': connect,
   'disconnect': disconnect,
-//  'profiles': profiles,
+  //  'profiles': profiles,
   'systems': systems,
   'nodes': nodes,
   'contexts': contexts,
@@ -206,7 +209,7 @@ async function main(argv) {
     try {
       // Connect to key store?
       await connect();
-    } catch(e) {
+    } catch (e) {
       // Failure
     }
 
@@ -225,7 +228,7 @@ async function main(argv) {
 
     open();
     prompt();
-  } catch(e) {
+  } catch (e) {
     // Failure
     error(e);
     exit(1);
@@ -291,7 +294,7 @@ function parse(args) {
     }
 
     // What option?
-    switch(arg) {
+    switch (arg) {
       case '-h':
       case '--help':
         // Show usage
@@ -399,75 +402,75 @@ function open(history) {
     completer: completer,
     prompt: prompt()
   })
-  // Input line
-  .on('line', async (line) => {
-    // Reset confirm
-    if (signal !== undefined) return;
-    confirm = false;
+    // Input line
+    .on('line', async (line) => {
+      // Reset confirm
+      if (signal !== undefined) return;
+      confirm = false;
 
-    try {
-      // Parse line
-      await command(line);
-    } catch(e) {
-      // Failure
-      broadcast({
-        stats: {errors: ++stats.errors}
-      });
+      try {
+        // Parse line
+        await command(line);
+      } catch (e) {
+        // Failure
+        broadcast({
+          stats: { errors: ++stats.errors }
+        });
 
-      error(e);
-    }
+        error(e);
+      }
 
-    // Next prompt
-    prompt();
-  })
-  // Ctrl+C
-  .on('SIGINT', () => {
-    // Catch signal
-    if (signal !== undefined) {
-      print('\r' + E_ABORT);
-
-      signal();
-      signal = undefined;
-
-      return;
-    }
-
-    // Are you sure?
-    if (!confirm) {
-      confirm = true;
-
-      print('\n(To exit, press Ctrl+C again or Ctrl+D or type exit)');
+      // Next prompt
       prompt();
+    })
+    // Ctrl+C
+    .on('SIGINT', () => {
+      // Catch signal
+      if (signal !== undefined) {
+        print('\r' + E_ABORT);
 
-      return;
-    }
+        signal();
+        signal = undefined;
 
-    // Terminate
-    print('\r');
-    exit();
-  })
-  // Console closed
-  .on('close', () => {
-    // Ctrl+D
-    const key = terminal._previousKey || {};
+        return;
+      }
 
-    if (key.ctrl && key.name === 'd') {
+      // Are you sure?
+      if (!confirm) {
+        confirm = true;
+
+        print('\n(To exit, press Ctrl+C again or Ctrl+D or type exit)');
+        prompt();
+
+        return;
+      }
+
       // Terminate
       print('\r');
       exit();
-    }
-  });
+    })
+    // Console closed
+    .on('close', () => {
+      // Ctrl+D
+      const key = terminal._previousKey || {};
+
+      if (key.ctrl && key.name === 'd') {
+        // Terminate
+        print('\r');
+        exit();
+      }
+    });
 }
 
 // Tab completer
 function completer(line) {
   const hits = completions.filter((c) => c.startsWith(line));
-  return [(hits.length > 0)?hits:completions, line];
+  return [(hits.length > 0) ? hits : completions, line];
 }
 
 // Output console prompt
 function prompt() {
-  const text = options.silent?'':escape(options.prompt);
+  const text = options.silent ? '' : escape(options.prompt);
 
   if (terminal !== undefined) {
     terminal.setPrompt(text);
@@ -560,7 +563,7 @@ async function command(line) {
 
 // Get command argument
 function argument(arg, def) {
-  const value = (arg === undefined)?def:arg;
+  const value = (arg === undefined) ? def : arg;
 
   if (typeof value === 'string')
     return variable(value);
@@ -717,11 +720,11 @@ function escape(value) {
         break;
       case 'w':
         // Path
-        data = client?shorten(namespace):'';
+        data = client ? shorten(namespace) : '';
         break;
       case 'W':
         // Directory
-        data = client?namespace.split('/').pop():'';
+        data = client ? namespace.split('/').pop() : '';
         break;
       case 'A':
         // Timestamp
@@ -774,7 +777,7 @@ function wildcard(loc) {
     absolute = true;
 
   // Relative path?
-  if (!absolute) loc = (namespace?(namespace + '/'):'') + loc;
+  if (!absolute) loc = (namespace ? (namespace + '/') : '') + loc;
 
   // Normalize path
   loc = path.normalize(loc);
@@ -852,7 +855,7 @@ function help() {
   print('  init                                   Initialize config file');
   print('  connect                                Connect to network');
   print('  disconnect                             Disconnect from network');
-//  print('  profiles [profile] [version]           Display profile descriptors');
+  //  print('  profiles [profile] [version]           Display profile descriptors');
   print('  systems [system]                       Configure system properties');
   print('  nodes system [node]                    Configure node properties');
   print('  contexts system node [context]         Configure context properties');
@@ -923,18 +926,18 @@ async function init() {
 
   // Ask questions
   const answers = await questions([
-      'CNS Host',
-      'CNS Port',
-      'CNS Username',
-      'CNS Password',
-      'CNS Profile Server'
-    ], [
-      config.host,
-      config.port,
-      config.username,
-      null,//config.password
-      config.profiles
-    ]);
+    'CNS Host',
+    'CNS Port',
+    'CNS Username',
+    'CNS Password',
+    'CNS Profile Server'
+  ], [
+    config.host,
+    config.port,
+    config.username,
+    null,//config.password
+    config.profiles
+  ]);
 
   // Get answers
   config.host = answers[0];
@@ -975,6 +978,10 @@ async function init() {
   // Construct contents
   var text = '';
 
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Connection timed out')), config.connect_timeout)
+  );
+
   for (const name in data)
     text += name + '=' + data[name] + '\n';
 
@@ -1000,7 +1007,7 @@ async function connect() {
 
   // Client options
   const options = {
-    hosts: host + (port?(':' + port):'')
+    hosts: host + (port ? (':' + port) : '')
   };
 
   // Using auth?
@@ -1042,37 +1049,37 @@ async function connect() {
     // Re-connect
     debug('Connected...');
   })
-  .on('put', (change) => {
-    // Key put
-    const key = change.key.toString();
-    const value = change.value.toString();
+    .on('put', (change) => {
+      // Key put
+      const key = change.key.toString();
+      const value = change.value.toString();
 
-    debug('PUT ' + key + ' = ' + value);
-    cache[key] = value;
+      debug('PUT ' + key + ' = ' + value);
+      cache[key] = value;
 
-    update(key, value);
-  })
-  .on('delete', (change) => {
-    // Key deleted
-    const key = change.key.toString();
-    const value = change.value.toString();
+      update(key, value);
+    })
+    .on('delete', (change) => {
+      // Key deleted
+      const key = change.key.toString();
+      const value = change.value.toString();
 
-    debug('DEL ' + key);
-    delete cache[key];
+      debug('DEL ' + key);
+      delete cache[key];
 
-    update(key, null);
-  })
-  .on('disconnected', () => {
-    // Broken connection
-    debug('Disconnected...');
-  })
-  .on('error', (e) => {
-    // Failure
-    throw new Error(E_WATCH + ': ' + e.message);
-  });
+      update(key, null);
+    })
+    .on('disconnected', () => {
+      // Broken connection
+      debug('Disconnected...');
+    })
+    .on('error', (e) => {
+      // Failure
+      throw new Error(E_WATCH + ': ' + e.message);
+    });
 
   // Success
-  print('Network on ' + (username?(username + '@'):'') + host);
+  print('Network on ' + (username ? (username + '@') : '') + host);
   stats.connection = S_ONLINE;
 
   broadcast({
@@ -1113,7 +1120,7 @@ async function disconnect() {
     client = undefined;
 
     broadcast({
-      stats: {connection: S_OFFLINE},
+      stats: { connection: S_OFFLINE },
       keys: {}
     });
   }
@@ -1168,14 +1175,14 @@ async function systems(arg1, arg2, arg3, arg4) {
 
     // Ask questions
     const answers = await questions([
-        'System Name',
-        'System Orchestrator',
-        'System Token'
-      ], [
-        cache[ns + 'name'] || name,
-        cache[ns + 'orchestrator'] || orchestrator,
-        cache[ns + 'token'] || token
-      ]);
+      'System Name',
+      'System Orchestrator',
+      'System Token'
+    ], [
+      cache[ns + 'name'] || name,
+      cache[ns + 'orchestrator'] || orchestrator,
+      cache[ns + 'token'] || token
+    ]);
 
     // Get answers
     name = answers[0];
@@ -1229,14 +1236,14 @@ async function nodes(arg1, arg2, arg3, arg4, arg5) {
 
     // Ask questions
     const answers = await questions([
-        'Node Name',
-        'Node Upstream',
-        'Node Token'
-      ], [
-        cache[ns + 'name'] || name,
-        cache[ns + 'upstream'] || upstream,
-        cache[ns + 'token'] || token
-      ]);
+      'Node Name',
+      'Node Upstream',
+      'Node Token'
+    ], [
+      cache[ns + 'name'] || name,
+      cache[ns + 'upstream'] || upstream,
+      cache[ns + 'token'] || token
+    ]);
 
     // Get answers
     name = answers[0];
@@ -1294,12 +1301,12 @@ async function contexts(arg1, arg2, arg3, arg4, arg5) {
 
     // Ask questions
     const answers = await questions([
-        'Context Name',
-        'Context Token'
-      ], [
-        cache[ns + 'name'] || name,
-        cache[ns + 'token'] || token
-      ]);
+      'Context Name',
+      'Context Token'
+    ], [
+      cache[ns + 'name'] || name,
+      cache[ns + 'token'] || token
+    ]);
 
     // Get answers
     name = answers[0];
@@ -1656,7 +1663,7 @@ function find(arg1) {
       const parts = key.split('/');
 
       const id = parts[parts.length - 2] || '';
-      const name = t1?cache[key]:'';
+      const name = t1 ? cache[key] : '';
 
       if (match(id, wildcard) || (t1 && match(name, wildcard))) {
         parts.pop();
@@ -1716,7 +1723,7 @@ async function ls(arg1, arg2) {
   if (!wild && !blank && !missing) root.pop();
 
   // Filter keys
-  const ns = prefix + ((blank || missing)?'/*':'');
+  const ns = prefix + ((blank || missing) ? '/*' : '');
   const keys = filter(cache, ns);
 
   // Reduce key names
@@ -1748,7 +1755,7 @@ async function get(arg1) {
 
   // Success
   broadcast({
-    stats: {reads: ++stats.reads}
+    stats: { reads: ++stats.reads }
   });
 
   display(key, value);
@@ -1774,7 +1781,7 @@ async function put(arg1, arg2) {
 
   // Success
   broadcast({
-    stats: {writes: ++stats.writes}
+    stats: { writes: ++stats.writes }
   });
 }
 
@@ -1796,7 +1803,7 @@ async function del(arg1) {
 
   // Success
   broadcast({
-    stats: {writes: ++stats.writes}
+    stats: { writes: ++stats.writes }
   });
 }
 
@@ -1818,7 +1825,7 @@ async function purge(arg1) {
 
   // Success
   broadcast({
-    stats: {writes: ++stats.writes}
+    stats: { writes: ++stats.writes }
   });
 }
 
@@ -1906,7 +1913,7 @@ async function run(arg1) {
     try {
       // Execute line
       await command(line);
-    } catch(e) {
+    } catch (e) {
       // Failure
       throw new Error(file + ': line ' + (l + 1) + ': ' + e.message);
     }
@@ -2000,7 +2007,7 @@ function table(root, value) {
     }
   } else t.push([root, value.toString()]);
 
-  return (t.length === 0)?'':tables.table(t);
+  return (t.length === 0) ? '' : tables.table(t);
 }
 
 // Forat as json
@@ -2013,7 +2020,7 @@ function json(root, value) {
 
 // Format as xml
 function xml(root, value, level) {
-  const nl = (indent() > 0)?'\n':'';
+  const nl = (indent() > 0) ? '\n' : '';
 
   if (typeof value === 'object') {
     var t = level + '<group name="' + root + '">' + nl;
@@ -2088,9 +2095,9 @@ function renderTree(data, render) {
     var name = '';
 
     for (const parent of item.parents)
-      name += (parent.last?' ':'│') + p1;
+      name += (parent.last ? ' ' : '│') + p1;
 
-    name += (item.last?'└':'├') + p2 + item.name;
+    name += (item.last ? '└' : '├') + p2 + item.name;
 
     // Add item
     render.push(justify(name, item.value));
@@ -2108,15 +2115,15 @@ function justify(name, value) {
   const cols = columns();
   const span = cols - name.length - value.length;
 
-  return (span > 0)?
-    ((value === '')?name:(name + ' '.repeat(span) + value)):
+  return (span > 0) ?
+    ((value === '') ? name : (name + ' '.repeat(span) + value)) :
     ((name + value).substr(0, cols - 1) + '…');
 }
 
 // Get indent
 function indent(char) {
   const size = Math.min(Math.max(options.indent, 0), 8);
-  return (char === undefined)?size:char.repeat(size);
+  return (char === undefined) ? size : char.repeat(size);
 }
 
 // Get column count
@@ -2162,12 +2169,12 @@ async function input(prompt, def) {
       input: process.stdin,
       output: process.stdout
     })
-    // Ctrl+C
-    .on('SIGINT', () => {
-      // Abort input
-      resume(rl, history);
-      resolve(null);
-    });
+      // Ctrl+C
+      .on('SIGINT', () => {
+        // Abort input
+        resume(rl, history);
+        resolve(null);
+      });
 
     // Hide input?
     if (def === null) {
@@ -2278,14 +2285,14 @@ async function getProfile(name) {
         for (const property of version.properties) {
           properties[property.name] = {
             name: property.description || property.name,
-            provider: (property.server === null)?'yes':'no',
-            required: (property.required === null)?'yes':'no',
-            propagate: (property.propagate === null)?'yes':'no'
+            provider: (property.server === null) ? 'yes' : 'no',
+            required: (property.required === null) ? 'yes' : 'no',
+            propagate: (property.propagate === null) ? 'yes' : 'no'
           };
         }
         profile.versions['version' + (n + 1)] = properties;
       }
-    } catch(e) {
+    } catch (e) {
       // Failure
       debug(e.message);
       profile = null;
@@ -2439,49 +2446,49 @@ function start(host, port) {
 
   // Create server
   server = http.createServer(app)
-  // Started
-  .on('listening', () => {
-    // Create web socket
-    debug('Creating websocket...');
-    wss = expressws(app, server).getWss();
+    // Started
+    .on('listening', () => {
+      // Create web socket
+      debug('Creating websocket...');
+      wss = expressws(app, server).getWss();
 
-    // Web socket request
-    app.ws('/', async (ws, req) => {
-      // Receive
-      ws.on('message', async (packet) => {
-        debug('Websocket request: ' + packet);
-        await receive(ws, packet);
-      })
-      // Close
-      .on('close', () => {
-        debug('Websocket disconnect...');
-      })
-      // Failure
-      .on('error', (e) => {
-        debug('Websocket error: ' + e.message);
+      // Web socket request
+      app.ws('/', async (ws, req) => {
+        // Receive
+        ws.on('message', async (packet) => {
+          debug('Websocket request: ' + packet);
+          await receive(ws, packet);
+        })
+          // Close
+          .on('close', () => {
+            debug('Websocket disconnect...');
+          })
+          // Failure
+          .on('error', (e) => {
+            debug('Websocket error: ' + e.message);
+          });
+
+        // Initial changes
+        debug('Websocket connect...');
+
+        ws.send(JSON.stringify({
+          version: pack.version,
+          stats: stats,
+          keys: cache
+        }));
       });
 
-      // Initial changes
-      debug('Websocket connect...');
+      // All other requests
+      app.use((req, res) => {
+        res.status(404).send('<h1>Page not found</h1>');
+      });
 
-      ws.send(JSON.stringify({
-        version: pack.version,
-        stats: stats,
-        keys: cache
-      }));
+      print('CNS Dashboard running on http://' + host + ':' + port);
+    })
+    // Failure
+    .on('error', (e) => {
+      error(e);
     });
-
-    // All other requests
-    app.use((req, res) => {
-      res.status(404).send('<h1>Page not found</h1>');
-    });
-
-    print('CNS Dashboard running on http://' + host + ':' + port);
-  })
-  // Failure
-  .on('error', (e) => {
-    error(e);
-  });
 
   // Start listening
   server.listen(port);
@@ -2519,10 +2526,10 @@ async function receive(ws, packet) {
 
     try {
       await command(cmd);
-    } catch(e) {
+    } catch (e) {
       // Failure
       broadcast({
-        stats: {errors: ++stats.errors}
+        stats: { errors: ++stats.errors }
       });
 
       display('error', e.message);
@@ -2549,10 +2556,10 @@ async function receive(ws, packet) {
     // Send response
     debug('Websocket response: ' + response);
     ws.send(response);
-  } catch(e) {
+  } catch (e) {
     // Failure
     broadcast({
-      stats: {errors: ++stats.errors}
+      stats: { errors: ++stats.errors }
     });
 
     error(e);
@@ -2566,7 +2573,7 @@ function update(key, value) {
   keys[key] = value;
 
   broadcast({
-    stats: {updates: ++stats.updates},
+    stats: { updates: ++stats.updates },
     keys: keys
   });
 }
@@ -2592,7 +2599,7 @@ function broadcast(changes) {
     wss.clients.forEach((ws) => {
       ws.send(packet);
     });
-  } catch(e) {
+  } catch (e) {
     // Failure
     debug(e.message);
   }
@@ -2622,8 +2629,8 @@ function request(method, url, data) {
   // I promise to
   return new Promise((resolve, reject) => {
     // Decode url
-    const decode = new URL(url.startsWith('localhost')?('http://' + url):url);
-    const handler = (decode.protocol === 'https:')?https:http;
+    const decode = new URL(url.startsWith('localhost') ? ('http://' + url) : url);
+    const handler = (decode.protocol === 'https:') ? https : http;
 
     const options = {
       protocol: decode.protocol,
@@ -2650,10 +2657,10 @@ function request(method, url, data) {
     }
     req.end();
   })
-  .then((result) => {
-    // Get response
-    return response(result);
-  });
+    .then((result) => {
+      // Get response
+      return response(result);
+    });
 }
 
 // Get http response
@@ -2683,7 +2690,7 @@ function comment() {
 
 // Ensure extension
 function extension(file, ext) {
-  return file.endsWith(ext)?file:(file + ext);
+  return file.endsWith(ext) ? file : (file + ext);
 }
 
 // Read from file
@@ -2696,7 +2703,7 @@ function read(file) {
     // Read file
     debug('Reading ' + file + '...');
     return fs.readFileSync(file, 'utf8');
-  } catch(e) {
+  } catch (e) {
     // Failure
     throw new Error(E_READ + ': ' + file);
   }
@@ -2712,7 +2719,7 @@ function write(file, data) {
     // Write file
     debug('Writing ' + file + '...');
     fs.writeFileSync(file, data, 'utf8');
-  } catch(e) {
+  } catch (e) {
     // Failure
     throw new Error(E_WRITE + ': ' + file);
   }
