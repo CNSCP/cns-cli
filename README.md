@@ -51,6 +51,7 @@ Your application should now be ready to rock.
 | CNS_USERNAME     | Network username            |                             |
 | CNS_PASSWORD     | Network password            |                             |
 | CNS_PROFILES     | Profile server URI          | https://cp.padi.io/profiles |
+| CNS_DASHBOARD_SECRET | Dashboard JWT signing secret. When set, dashboard requires an Bearer token on every request. When unset, the dashboard is unauthenticated. | |
 
 ### Command Line
 

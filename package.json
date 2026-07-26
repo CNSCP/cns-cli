@@ -21,6 +21,7 @@
     "etcd3": "^1.1.2",
     "express": "^4.17.1",
     "express-ws": "^4.0.0",
+    "jsonwebtoken": "^9.0.3",
     "short-uuid": "^5.2.0",
     "table": "^6.9.0"
   }

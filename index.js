@@ -17,6 +17,7 @@ const short = require('short-uuid');
 const express = require('express');
 const expressws = require('express-ws');
 const compression = require('compression');
+const jwt = require('jsonwebtoken');
 const http = require('http');
 const https = require('https');
 const path = require('path');
@@ -37,6 +38,7 @@ const E_MISSMATCH = 'Type missmatch';
 const E_CONFIG = 'Not configured';
 const E_AVAILABLE = 'Not available';
 const E_CONNECT = 'Not connected';
+const E_AUTH = 'Not authorized';
 const E_FOUND = 'Not found';
 const E_CACHE = 'Failed to cache';
 const E_WATCH = 'Failed to watch';
@@ -79,6 +81,7 @@ const defaults = {
   password: '',
   profiles: 'https://cp.padi.io/profiles',
   connect_timeout: '10000',
+  dashboardSecret: ''
 };
 
 // Configuration
@@ -90,7 +93,7 @@ const config = {
   password: process.env.CNS_PASSWORD || defaults.password,
   profiles: process.env.CNS_PROFILES || defaults.profiles,
   connect_timeout: parseInt(process.env.CONNECT_TIMEOUT || defaults.connect_timeout),
-  secureDashboard: process.env.SECURE_DASHBOARD || defaults.secureDashboard
+  dashboardSecret: process.env.CNS_DASHBOARD_SECRET || defaults.dashboardSecret
 };
 
 // Options
@@ -2443,6 +2446,36 @@ function match(text, filter) {
   return new RegExp('^' + filter.split('*').map(esc).join('.*') + '$', 'i').test(text);
 }
 
+// Verify dashboard bearer token
+function verifyToken(header, done) {
+  // Auth disabled?
+  if (config.dashboardSecret === '') {
+    done(true);
+    return;
+  }
+
+  // Must have bearer token
+  const match = (header || '').match(/^Bearer\s+(.+)$/i);
+
+  if (match === null) {
+    done(false);
+    return;
+  }
+
+  // Verify token
+  jwt.verify(match[1], config.dashboardSecret, { algorithms: ['HS256'] }, (e) => {
+    done(!e);
+  });
+}
+
+// Authorize dashboard HTTP request
+function authorize(req, res, next) {
+  verifyToken(req.headers['authorization'], (ok) => {
+    if (ok) next();
+    else res.status(401).send(E_AUTH);
+  });
+}
+
 // Start dashboard server
 function start(host, port) {
   // Stop previous
@@ -2452,6 +2485,7 @@ function start(host, port) {
   const app = new express();
 
   app.use(compression());
+  app.use(authorize);
   app.use(express.static(path.join(__dirname, '/public')));
 
   debug('Creating webserver...');
@@ -2462,7 +2496,17 @@ function start(host, port) {
     .on('listening', () => {
       // Create web socket
       debug('Creating websocket...');
-      wss = expressws(app, server).getWss();
+
+      wss = expressws(app, server, {
+        wsOptions: {
+          // Reject unauthorized upgrades before the handshake completes
+          verifyClient: (info, cb) => {
+            verifyToken(info.req.headers['authorization'], (ok) => {
+              cb(ok, ok ? undefined : 401, ok ? undefined : E_AUTH);
+            });
+          }
+        }
+      }).getWss();
 
       // Web socket request
       app.ws('/', async (ws, req) => {
