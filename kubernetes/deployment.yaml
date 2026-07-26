@@ -29,3 +29,5 @@ spec:
         envFrom:
         - secretRef:
             name: cns-password
+        - secretRef:
+            name: cns-dashboard-secret
