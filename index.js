@@ -2470,6 +2470,12 @@ function verifyToken(header, done) {
 
 // Authorize dashboard HTTP request
 function authorize(req, res, next) {
+  // Always allow the dashboard page itself
+  if (req.method === 'GET' && req.path === '/') {
+    next();
+    return;
+  }
+
   verifyToken(req.headers['authorization'], (ok) => {
     if (ok) next();
     else res.status(401).send(E_AUTH);
