@@ -2470,8 +2470,8 @@ function verifyToken(header, done) {
 
 // Authorize dashboard HTTP request
 function authorize(req, res, next) {
-  // Always allow the dashboard page itself
-  if (req.method === 'GET' && req.path === '/') {
+  // Always allow the dashboard page and its top-level assets
+  if (req.method === 'GET' && /^\/([^/]+\.(js|css))?$/.test(req.path)) {
     next();
     return;
   }
