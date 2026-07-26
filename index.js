@@ -2446,38 +2446,64 @@ function match(text, filter) {
   return new RegExp('^' + filter.split('*').map(esc).join('.*') + '$', 'i').test(text);
 }
 
+// Name of the cookie holding a pasted dashboard token
+const DASHBOARD_COOKIE = 'cns_dashboard_token';
+
+// Extract bearer token from request headers or dashboard cookie
+function extractToken(headers) {
+  const auth = headers['authorization'] || '';
+  const match = auth.match(/^Bearer\s+(.+)$/i);
+
+  if (match !== null) return match[1];
+
+  const cookies = headers['cookie'] || '';
+
+  for (const part of cookies.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq === -1) continue;
+
+    if (part.slice(0, eq).trim() === DASHBOARD_COOKIE)
+      return decodeURIComponent(part.slice(eq + 1).trim());
+  }
+  return undefined;
+}
+
 // Verify dashboard bearer token
-function verifyToken(header, done) {
+function verifyToken(headers, done) {
   // Auth disabled?
   if (config.dashboardSecret === '') {
     done(true);
     return;
   }
 
-  // Must have bearer token
-  const match = (header || '').match(/^Bearer\s+(.+)$/i);
+  // Must have a token
+  const token = extractToken(headers);
 
-  if (match === null) {
+  if (token === undefined) {
     done(false);
     return;
   }
 
   // Verify token
-  jwt.verify(match[1], config.dashboardSecret, { algorithms: ['HS256'] }, (e) => {
+  jwt.verify(token, config.dashboardSecret, { algorithms: ['HS256'] }, (e) => {
     done(!e);
   });
 }
 
 // Authorize dashboard HTTP request
 function authorize(req, res, next) {
-  if (!req.ws) {
-    next();
-    return;
-  }
+  verifyToken(req.headers, (ok) => {
+    if (ok) {
+      next();
+      return;
+    }
 
-  verifyToken(req.headers['authorization'], (ok) => {
-    if (ok) next();
-    else res.status(401).send(E_AUTH);
+    // Send page loads to the login page rather than a bare 401
+    if (!req.ws && req.method === 'GET' && req.path === '/') {
+      res.redirect('/login');
+      return;
+    }
+    res.status(401).send(E_AUTH);
   });
 }
 
@@ -2490,6 +2516,44 @@ function start(host, port) {
   const app = new express();
 
   app.use(compression());
+  app.use(express.urlencoded({ extended: false }));
+
+  // Login page - always reachable, never behind auth
+  app.get('/login', (req, res) => {
+    if (config.dashboardSecret === '') {
+      res.redirect('/');
+      return;
+    }
+    res.sendFile(path.join(__dirname, '/public/login.html'));
+  });
+
+  app.post('/login', (req, res) => {
+    if (config.dashboardSecret === '') {
+      res.redirect('/');
+      return;
+    }
+
+    const token = (req.body.token || '').trim();
+
+    jwt.verify(token, config.dashboardSecret, { algorithms: ['HS256'] }, (e) => {
+      if (e) {
+        res.redirect('/login?error=1');
+        return;
+      }
+
+      // Store token as a cookie so the browser sends it on every request,
+      // including the WebSocket handshake
+      res.cookie(DASHBOARD_COOKIE, token, {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: req.secure,
+        path: '/',
+        maxAge: 365 * 24 * 60 * 60 * 1000
+      });
+      res.redirect('/');
+    });
+  });
+
   app.use(authorize);
   app.use(express.static(path.join(__dirname, '/public')));
 
@@ -2506,7 +2570,7 @@ function start(host, port) {
         wsOptions: {
           // Reject unauthorized upgrades before the handshake completes
           verifyClient: (info, cb) => {
-            verifyToken(info.req.headers['authorization'], (ok) => {
+            verifyToken(info.req.headers, (ok) => {
               cb(ok, ok ? undefined : 401, ok ? undefined : E_AUTH);
             });
           }
