@@ -39,6 +39,8 @@ const E_CONFIG = 'Not configured';
 const E_AVAILABLE = 'Not available';
 const E_CONNECT = 'Not connected';
 const E_AUTH = 'Not authorized';
+const E_FORBIDDEN = 'Command not permitted over socket';
+const E_RELATIVE = 'Absolute key required over socket';
 const E_FOUND = 'Not found';
 const E_CACHE = 'Failed to cache';
 const E_WATCH = 'Failed to watch';
@@ -173,6 +175,22 @@ const shortcuts = {
   'e': 'exit',
   'q': 'quit'
 };
+
+// Commands a remote (websocket) caller may invoke. Everything else — eval,
+// curl, run, connect/disconnect, dashboard, output, cd, init, ... — is
+// console-only. This is an ALLOWLIST by design: new CLI conveniences are not
+// silently reachable over the wire. See receive()/command() for enforcement.
+const socketCommands = new Set([
+  'systems', 'nodes', 'contexts', 'providers', 'consumers', 'connections',
+  'get', 'put', 'del', 'purge',
+  'ls', 'map', 'find', 'status', 'version', 'help'
+]);
+
+// Socket-reachable commands whose first argument is a key that must be
+// absolute — relative keys resolve through the shared `namespace` (cd), which
+// is global across all sockets, so a relative key from one client can be
+// reinterpreted by another's cd. Require absolute keys from the wire.
+const socketKeyCommands = new Set(['get', 'put', 'del', 'purge', 'ls']);
 
 // Local data
 
@@ -511,8 +529,11 @@ function close() {
 
 // Parse command
 async function command(line) {
-  // Expression eval?
+  // Expression eval? Console only — a socket caller must never reach eval,
+  // even when debug is on (which itself is no longer socket-settable).
   if (options.debug && line.startsWith('!')) {
+    if (pipe !== undefined)
+      throw new Error(E_FORBIDDEN + ': !');
     console.log(eval(line.substr(1)));
     return;
   }
@@ -540,6 +561,10 @@ async function command(line) {
 
     // Variable assign?
     if (cmd.startsWith('$')) {
+      // Variables are a shared global — not writable from the wire.
+      if (pipe !== undefined)
+        throw new Error(E_FORBIDDEN + ': ' + arg);
+
       const name = cmd.substr(1);
 
       if (args[0] === '=' && len < 3) {
@@ -550,10 +575,32 @@ async function command(line) {
     }
 
     // Get command handler?
-    const fn = commands[shortcuts[cmd] || cmd];
+    const name = shortcuts[cmd] || cmd;
+    const fn = commands[name];
 
     if (fn === undefined)
       throw new Error(E_COMMAND + ': ' + arg);
+
+    // Socket caller: enforce the participant allowlist and reject relative
+    // keys (which would resolve through another client's shared cd state).
+    if (pipe !== undefined) {
+      if (!socketCommands.has(name))
+        throw new Error(E_FORBIDDEN + ': ' + arg);
+
+      if (socketKeyCommands.has(name) && args[0] !== undefined && !isAbsoluteKey(args[0]))
+        throw new Error(E_RELATIVE + ': ' + args[0]);
+
+      // Interim blast-radius guard (full per-system authz is Stage 3): a
+      // subtree purge must target at least a whole system (cns/<systemId>) —
+      // never 'cns' (the entire realm). Self-retraction still works; a
+      // realm-wide wipe does not. Does NOT stop targeting a *known* other
+      // system — that needs connection identity.
+      if (name === 'purge' && args[0] !== undefined) {
+        const depth = wildcard(args[0]).split('/').filter(Boolean).length;
+        if (depth < 2)
+          throw new Error(E_FORBIDDEN + ': purge above system scope');
+      }
+    }
 
     // Too many args?
     if (cmd !== '?' && cmd !== 'echo' && len > fn.length)
@@ -764,6 +811,15 @@ function location(loc) {
     throw new Error(E_ARGUMENT);
 
   return wildcard(loc);
+}
+
+// Is this key absolute (independent of the shared `namespace`)? Mirrors the
+// absoluteness rules in wildcard(): a leading '/', a '~' home path, or a
+// path already rooted at 'cns'.
+function isAbsoluteKey(loc) {
+  if (typeof loc !== 'string' || loc === '') return false;
+  const expanded = expand(loc);
+  return expanded.startsWith('/') || expanded.split('/')[0] === 'cns';
 }
 
 // Get wildcard path
