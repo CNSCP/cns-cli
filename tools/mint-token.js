@@ -13,13 +13,33 @@
 //          '*'  = unscoped (may act as any system) — use explicitly.
 //          absent = LEGACY, treated as unscoped for backward compatibility.
 //                   Prefer '*' so that absence can later mean deny.
-//   role   participant (default) | observer | operator | service
+//   role   participant (default) | observer | operator | service | enrol
 //            participant  own tree only, read and write
 //            observer     + read the whole realm
 //            operator     + write/delete anywhere, full command set (dashboard console)
 //            service      realm-resident infrastructure
+//            enrol        NOTHING but exchange itself for a participant token
 //   sub    subject, informational
 //   exp    expiry (standard JWT claim)
+//
+// ENROLMENT
+//   role=enrol is the credential an app or device ships with. It reads
+//   nothing, writes nothing and registers nothing; its only power is
+//   `enrol <systemId>`, which returns a participant token bound to that
+//   system. Two flavours, and the difference matters:
+//
+//     --role enrol                 general voucher: may enrol ANY system that
+//                                  is not already enrolled. One credential for
+//                                  a whole fleet, but if leaked it can claim
+//                                  unclaimed ids — including pre-empting a
+//                                  device whose id is derivable (Pi model +
+//                                  serial) before it first connects.
+//     --role enrol --sys <id>      locked voucher: may ONLY ever produce that
+//                                  system. Needs per-device issuance, but a
+//                                  stolen voucher is worth exactly one system.
+//
+//   Issued participant tokens are opaque and stored by hash, so they are
+//   individually revocable (`revoke <systemId>`).
 //
 // NOTE the signing algorithm is HS256 with a secret shared between the issuer
 // and every realm, which means a realm can MINT tokens, not merely verify
@@ -41,12 +61,12 @@ const sub = opt('sub', 'cns-test');
 const exp = opt('exp', '365d');
 
 if (!secret) {
-  console.error('usage: mint-token.js --secret <shared-secret> [--sys <id>|*] [--role participant|observer|operator|service] [--exp 30d]');
+  console.error('usage: mint-token.js --secret <shared-secret> [--sys <id>|*] [--role participant|observer|operator|service|enrol] [--exp 30d]');
   console.error('       (or set CNS_DASHBOARD_SECRET)');
   process.exit(2);
 }
 
-const ROLES = ['participant', 'observer', 'operator', 'service'];
+const ROLES = ['participant', 'observer', 'operator', 'service', 'enrol'];
 if (!ROLES.includes(role)) {
   console.error('role must be one of: ' + ROLES.join(', '));
   process.exit(2);

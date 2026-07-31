@@ -1996,6 +1996,15 @@ async function enrol(arg1) {
   if (identity.role !== R_ENROL && !isOperator)
     throw new Error(E_FORBIDDEN + ': enrol requires an enrolment or operator credential');
 
+  // An enrolment credential MAY carry a sys claim. When it does it is a
+  // voucher for exactly that system and nothing else — so a leaked voucher is
+  // worth only the one system, and cannot be used to pre-emptively claim an
+  // id belonging to a device that has not come online yet. Without a sys
+  // claim it is a general voucher: any system not already enrolled.
+  if (identity.role === R_ENROL && identity.system !== undefined &&
+    identity.system !== system)
+    throw new Error(E_SCOPE + ': this enrolment credential may only enrol ' + identity.system);
+
   // First claim wins.
   const claimKey = CLAIM_PREFIX + system;
   const claimed = await client.get(claimKey).string()

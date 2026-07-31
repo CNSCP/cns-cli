@@ -88,6 +88,20 @@ async function main() {
   const second = await e(`enrol ${OTHER}`);
   check(!denied(second), 'enrol: a different, unclaimed system still works');
 
+  // ---------- 3b. a sys-scoped enrolment voucher is locked to one system ----------
+  const LOCKED = 'aa110000-0000-4000-8000-0000000000aa';
+  const OTHER2 = 'bb220000-0000-4000-8000-0000000000bb';
+  const v = await open(mint(LOCKED, 'enrol'));
+  const vr = rpcFactory(v.ws);
+
+  check(denied(await vr(`enrol ${OTHER2}`)),
+    'voucher: sys-scoped enrolment cannot enrol a DIFFERENT system');
+  const vres = await vr(`enrol ${LOCKED}`);
+  const vissued = (vres.response && vres.response.enrolment) || {};
+  check(vissued.system === LOCKED && vissued.role === 'participant',
+    'voucher: sys-scoped enrolment issues its own system', body(vres).slice(0, 120));
+  try { v.ws.close(); } catch { /* */ }
+
   // ---------- 4. the issued token behaves as a scoped participant ----------
   const app = await open(issued.token);
   const a = rpcFactory(app.ws);
