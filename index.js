@@ -22,6 +22,7 @@ const http = require('http');
 const https = require('https');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { AsyncLocalStorage } = require('async_hooks');
 
 const pack = require('./package.json');
@@ -50,6 +51,13 @@ const R_PARTICIPANT = 'participant';  // default: own tree only
 const R_OBSERVER = 'observer';        // + read the whole realm
 const R_OPERATOR = 'operator';        // + write/delete anywhere, full command table
 const R_SERVICE = 'service';          // realm-resident infrastructure
+const R_ENROL = 'enrol';              // NOTHING except exchange itself for a participant token
+
+// Enrolment records live OUTSIDE the 'cns' prefix, so they are never in the
+// key cache, never in a snapshot and never broadcast. Only a hash of each
+// issued token is stored — the token itself is returned once and never kept.
+const ENROL_PREFIX = 'auth/enrolments/';
+const CLAIM_PREFIX = 'auth/systems/';
 const E_FOUND = 'Not found';
 const E_CACHE = 'Failed to cache';
 const E_WATCH = 'Failed to watch';
@@ -157,6 +165,9 @@ const commands = {
   'put': put,
   'del': del,
   'purge': purge,
+  'enrol': enrol,
+  'enroll': enrol,
+  'revoke': revoke,
   'cls': cls,
   'echo': echo,
   'ask': ask,
@@ -192,8 +203,12 @@ const shortcuts = {
 const socketCommands = new Set([
   'systems', 'nodes', 'contexts', 'providers', 'consumers', 'connections',
   'get', 'put', 'del', 'purge',
-  'ls', 'map', 'find', 'status', 'version', 'help'
+  'ls', 'map', 'find', 'status', 'version', 'help',
+  'enrol', 'enroll', 'revoke'
 ]);
+
+// The ONLY commands an enrolment credential may invoke.
+const enrolCommands = new Set(['enrol', 'enroll', 'help', 'version']);
 
 // Socket-reachable commands whose first argument is a key that must be
 // absolute — relative keys resolve through the shared `namespace` (cd), which
@@ -643,6 +658,10 @@ async function command(line) {
       // view is exactly that — a remote console for a realm administrator. Any
       // lesser role gets the participant allowlist.
       const console = identity.role === R_OPERATOR && !identity.legacy;
+
+      // An enrolment credential can do exactly one thing.
+      if (identity.role === R_ENROL && !enrolCommands.has(name))
+        throw new Error(E_FORBIDDEN + ': enrolment credential may only enrol');
 
       if (!console && !socketCommands.has(name))
         throw new Error(E_FORBIDDEN + ': ' + arg);
@@ -1939,6 +1958,127 @@ async function put(arg1, arg2) {
   });
 }
 
+// Exchange this connection's credential for a participant token bound to a
+// system id — the automated enrolment path.
+//
+//   enrol <systemId>
+//
+// Properties:
+//   * ATTENUATING — the result is always `participant`, never more than the
+//     caller holds. An enrolment credential can therefore be distributed
+//     (installers, device images, app config) without granting anything.
+//   * FIRST CLAIM WINS — once a system id has been enrolled it cannot be
+//     enrolled again, so a widely-distributed enrolment token cannot be used
+//     to impersonate a system that already exists. An operator may re-issue.
+//   * OPAQUE — the issued token is random, not a signed assertion. Only its
+//     hash is stored, so it is individually revocable (which shared-secret
+//     JWTs are not), and the realm needs no signing key to mint it.
+async function enrol(arg1) {
+  // Must be connected
+  if (client === undefined)
+    throw new Error(E_CONNECT);
+
+  const identity = session().identity;
+  const system = required(arg1);
+
+  if (!/^[A-Za-z0-9._-]{1,64}$/.test(system))
+    throw new Error(E_ARGUMENT + ': ' + system);
+
+  // Who may exchange: an enrolment credential, or an operator issuing on
+  // someone's behalf. Everyone else already has an identity.
+  const isOperator = identity.role === R_OPERATOR && !identity.legacy;
+
+  if (identity.role !== R_ENROL && !isOperator)
+    throw new Error(E_FORBIDDEN + ': enrol requires an enrolment or operator credential');
+
+  // First claim wins.
+  const claimKey = CLAIM_PREFIX + system;
+  const claimed = await client.get(claimKey).string()
+    .catch((e) => { throw new Error(E_GET + ': ' + e.message); });
+
+  if (claimed !== null && !isOperator)
+    throw new Error(E_FORBIDDEN + ': system ' + system + ' is already enrolled');
+
+  // Mint an opaque token; store only its hash.
+  const token = crypto.randomBytes(32).toString('base64url');
+  const hash = crypto.createHash('sha256').update(token).digest('hex');
+
+  const record = {
+    system: system,
+    role: R_PARTICIPANT,
+    issued: toTimestamp(),
+    revoked: false
+  };
+
+  await client.put(ENROL_PREFIX + hash).value(JSON.stringify(record))
+    .catch((e) => { throw new Error(E_PUT + ': ' + e.message); });
+
+  await client.put(claimKey).value(hash)
+    .catch((e) => { throw new Error(E_PUT + ': ' + e.message); });
+
+  display('enrolment', {
+    system: system,
+    role: R_PARTICIPANT,
+    token: token
+  });
+}
+
+// Revoke an enrolled system's credential (operator only).
+async function revoke(arg1) {
+  if (client === undefined)
+    throw new Error(E_CONNECT);
+
+  const identity = session().identity;
+
+  if (session().pipe !== undefined && !(identity.role === R_OPERATOR && !identity.legacy))
+    throw new Error(E_FORBIDDEN + ': revoke requires an operator credential');
+
+  const system = required(arg1);
+  const claimKey = CLAIM_PREFIX + system;
+
+  const hash = await client.get(claimKey).string()
+    .catch((e) => { throw new Error(E_GET + ': ' + e.message); });
+
+  if (hash === null) throw new Error(E_FOUND + ': ' + system);
+
+  const raw = await client.get(ENROL_PREFIX + hash).string()
+    .catch((e) => { throw new Error(E_GET + ': ' + e.message); });
+
+  const record = raw === null ? { system: system } : JSON.parse(raw);
+  record.revoked = true;
+  record.role = R_PARTICIPANT;
+
+  await client.put(ENROL_PREFIX + hash).value(JSON.stringify(record))
+    .catch((e) => { throw new Error(E_PUT + ': ' + e.message); });
+
+  // Free the claim so the system can be enrolled afresh.
+  await client.delete().key(claimKey)
+    .catch((e) => { throw new Error(E_DEL + ': ' + e.message); });
+
+  display('revoked', { system: system });
+}
+
+// Look up an opaque enrolment token. Returns claims-shaped data or undefined.
+async function lookupEnrolment(token) {
+  if (client === undefined) return undefined;
+
+  const hash = crypto.createHash('sha256').update(token).digest('hex');
+
+  const raw = await client.get(ENROL_PREFIX + hash).string().catch(() => null);
+  if (raw === null) return undefined;
+
+  let record;
+  try {
+    record = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+
+  if (record.revoked) return undefined;
+
+  return { sys: record.system, role: record.role || R_PARTICIPANT, sub: 'enrolled' };
+}
+
 // Delete key
 async function del(arg1) {
   // Must be connected
@@ -2626,9 +2766,17 @@ function verifyToken(headers, done) {
     return;
   }
 
-  // Verify token
+  // Verify token — a signed assertion from the issuer, or an opaque
+  // enrolment-issued token that this realm minted and stores the hash of.
   jwt.verify(token, config.dashboardSecret, { algorithms: ['HS256'] }, (e, payload) => {
-    done(!e, e ? undefined : payload);
+    if (!e) {
+      done(true, payload);
+      return;
+    }
+
+    lookupEnrolment(token)
+      .then((claims) => done(claims !== undefined, claims))
+      .catch(() => done(false, undefined));
   });
 }
 
@@ -2664,11 +2812,13 @@ function isPrivileged(identity) {
 
 // Full read of the realm?
 function maySeeAll(identity) {
+  if (identity.role === R_ENROL) return false;   // enrolment sees nothing
   return identity.legacy || identity.system === undefined || isPrivileged(identity);
 }
 
 // Write/delete outside own tree?
 function mayWriteAll(identity) {
+  if (identity.role === R_ENROL) return false;
   return identity.legacy || identity.system === undefined ||
     identity.role === R_OPERATOR || identity.role === R_SERVICE;
 }
@@ -2680,6 +2830,9 @@ function ownPrefix(identity) {
 
 // Filter a key set to what this identity may see.
 function visibleKeys(keys, identity) {
+  // An enrolment credential is not a participant: it has no tree and sees
+  // nothing. Its sole power is to exchange itself (see the `enrol` command).
+  if (identity.role === R_ENROL) return {};
   if (maySeeAll(identity)) return keys;
 
   const prefix = ownPrefix(identity);
