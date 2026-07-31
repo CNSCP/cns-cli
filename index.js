@@ -100,7 +100,8 @@ const defaults = {
   password: '',
   profiles: 'https://cp.padi.io/profiles',
   connect_timeout: '10000',
-  dashboardSecret: ''
+  dashboardSecret: '',
+  trustProxy: 1
 };
 
 // Configuration
@@ -112,7 +113,11 @@ const config = {
   password: process.env.CNS_PASSWORD || defaults.password,
   profiles: process.env.CNS_PROFILES || defaults.profiles,
   connect_timeout: parseInt(process.env.CONNECT_TIMEOUT || defaults.connect_timeout),
-  dashboardSecret: process.env.CNS_DASHBOARD_SECRET || defaults.dashboardSecret
+  dashboardSecret: process.env.CNS_DASHBOARD_SECRET || defaults.dashboardSecret,
+  // Hops (or subnet list) of trusted reverse proxy in front of the dashboard.
+  // Needed so req.secure reflects X-Forwarded-Proto behind a TLS-terminating
+  // ingress; see the 'trust proxy' note in start().
+  trustProxy: process.env.CNS_TRUST_PROXY ?? defaults.trustProxy
 };
 
 // Options
@@ -2870,6 +2875,18 @@ function start(host, port) {
   // Initialize express
   const app = new express();
 
+  // Behind an ingress that terminates TLS, the connection into this process is
+  // plain HTTP, so req.secure is false and the session cookie would be issued
+  // WITHOUT the Secure flag — i.e. sendable over plaintext. Trusting the proxy
+  // makes req.secure reflect X-Forwarded-Proto instead.
+  //
+  // CNS_TRUST_PROXY: number of hops, a comma-separated subnet list, or 'false'
+  // to disable. Defaults to 1 (a single ingress in front of us). Only set this
+  // when something trustworthy really is in front — a trusted proxy setting
+  // lets a client spoof X-Forwarded-* otherwise.
+  if (config.trustProxy !== false && config.trustProxy !== 'false')
+    app.set('trust proxy', config.trustProxy);
+
   app.use(compression());
   app.use(express.urlencoded({ extended: false }));
 
@@ -2890,21 +2907,38 @@ function start(host, port) {
 
     const token = (req.body.token || '').trim();
 
-    jwt.verify(token, config.dashboardSecret, { algorithms: ['HS256'] }, (e) => {
+    jwt.verify(token, config.dashboardSecret, { algorithms: ['HS256'] }, (e, payload) => {
       if (e) {
         res.redirect('/login?error=1');
         return;
       }
 
       // Store token as a cookie so the browser sends it on every request,
-      // including the WebSocket handshake
-      res.cookie(DASHBOARD_COOKIE, token, {
+      // including the WebSocket handshake.
+      //
+      // The cookie must not outlive the token it carries: an expired JWT in a
+      // still-valid cookie produces a rejected request rather than a clean
+      // trip back to the login page. Follow the token's own exp; fall back to
+      // a year only for a token that never expires.
+      const opts = {
         httpOnly: true,
         sameSite: 'lax',
         secure: req.secure,
-        path: '/',
-        maxAge: 365 * 24 * 60 * 60 * 1000
-      });
+        path: '/'
+      };
+
+      if (payload && payload.exp) {
+        const ms = payload.exp * 1000 - Date.now();
+        if (ms <= 0) {
+          res.redirect('/login?error=1');
+          return;
+        }
+        opts.maxAge = ms;
+      } else {
+        opts.maxAge = 365 * 24 * 60 * 60 * 1000;
+      }
+
+      res.cookie(DASHBOARD_COOKIE, token, opts);
       res.redirect('/');
     });
   });
