@@ -22,6 +22,7 @@ const http = require('http');
 const https = require('https');
 const path = require('path');
 const fs = require('fs');
+const { AsyncLocalStorage } = require('async_hooks');
 
 const pack = require('./package.json');
 
@@ -192,6 +193,40 @@ const socketCommands = new Set([
 // reinterpreted by another's cd. Require absolute keys from the wire.
 const socketKeyCommands = new Set(['get', 'put', 'del', 'purge', 'ls']);
 
+// Session state
+//
+// pipe/buffer/namespace/variables used to be module globals shared by the
+// console AND every websocket client. Two concurrent socket callers could
+// therefore cross each other's output (receive() saved and restored `pipe`
+// around an `await`, which yields), and one caller's `cd` changed how another
+// caller's relative keys resolved. Each socket connection now gets its own
+// session; the console keeps one of its own. AsyncLocalStorage carries the
+// current session across awaits without threading an argument through every
+// command function.
+
+const sessions = new AsyncLocalStorage();
+
+// Create a session. `pipe` undefined means "write to stdout" (the console).
+function createSession(pipe) {
+  return {
+    pipe: pipe,
+    buffer: '',
+    namespace: undefined,
+    variables: {},
+    format: undefined      // per-session output format; falls back to options.format
+  };
+}
+
+// The interactive console's session.
+const consoleSession = createSession(undefined);
+
+// Current session — the socket's if we are serving one, else the console's.
+// Callbacks outside any request (etcd watcher, broadcast) resolve to the
+// console session, which is correct: they print to stdout.
+function session() {
+  return sessions.getStore() || consoleSession;
+}
+
 // Local data
 
 var client;
@@ -200,14 +235,11 @@ var profiles;
 var cache;
 var watcher;
 
-var variables;
 
 var server;
 var wss;
 
 var calls;
-var pipe;
-var buffer;
 
 var terminal;
 var completions;
@@ -215,13 +247,12 @@ var confirm;
 var signal;
 var reply;
 
-var namespace;
 
 // Local functions
 
 // Main entry point
 async function main(argv) {
-  variables = {};
+  session().variables = {};
 
   try {
     // Parse options
@@ -532,7 +563,7 @@ async function command(line) {
   // Expression eval? Console only — a socket caller must never reach eval,
   // even when debug is on (which itself is no longer socket-settable).
   if (options.debug && line.startsWith('!')) {
-    if (pipe !== undefined)
+    if (session().pipe !== undefined)
       throw new Error(E_FORBIDDEN + ': !');
     console.log(eval(line.substr(1)));
     return;
@@ -562,13 +593,13 @@ async function command(line) {
     // Variable assign?
     if (cmd.startsWith('$')) {
       // Variables are a shared global — not writable from the wire.
-      if (pipe !== undefined)
+      if (session().pipe !== undefined)
         throw new Error(E_FORBIDDEN + ': ' + arg);
 
       const name = cmd.substr(1);
 
       if (args[0] === '=' && len < 3) {
-        variables[name] = argument(args[1], '');
+        session().variables[name] = argument(args[1], '');
         return;
       }
       throw new Error(E_ASSIGN);
@@ -583,7 +614,7 @@ async function command(line) {
 
     // Socket caller: enforce the participant allowlist and reject relative
     // keys (which would resolve through another client's shared cd state).
-    if (pipe !== undefined) {
+    if (session().pipe !== undefined) {
       if (!socketCommands.has(name))
         throw new Error(E_FORBIDDEN + ': ' + arg);
 
@@ -698,7 +729,7 @@ function variable(value) {
         break;
       case 'path':
         // Current path
-        data = namespace;
+        data = session().namespace;
         break;
       case 'ask':
         // Ask reply
@@ -711,7 +742,7 @@ function variable(value) {
         if (data === undefined) data = config[name];
         if (data === undefined) data = options[name];
         if (data === undefined) data = stats[name];
-        if (data === undefined) data = variables[name];
+        if (data === undefined) data = session().variables[name];
         break;
     }
 
@@ -770,11 +801,11 @@ function escape(value) {
         break;
       case 'w':
         // Path
-        data = client ? shorten(namespace) : '';
+        data = client ? shorten(session().namespace) : '';
         break;
       case 'W':
         // Directory
-        data = client ? namespace.split('/').pop() : '';
+        data = client ? session().namespace.split('/').pop() : '';
         break;
       case 'A':
         // Timestamp
@@ -836,7 +867,7 @@ function wildcard(loc) {
     absolute = true;
 
   // Relative path?
-  if (!absolute) loc = (namespace ? (namespace + '/') : '') + loc;
+  if (!absolute) loc = (session().namespace ? (session().namespace + '/') : '') + loc;
 
   // Normalize path
   loc = path.normalize(loc);
@@ -940,7 +971,7 @@ function help() {
   print('  quit                                   Quit the console');
 
   // Console mode?
-  if (terminal !== undefined && pipe === undefined)
+  if (terminal !== undefined && session().pipe === undefined)
     print('\nPress Ctrl+C to abort current command, Ctrl+D to exit the console.');
 }
 
@@ -974,7 +1005,7 @@ function dashboard(arg1) {
 // Init environment
 async function init() {
   // Must be console
-  if (pipe !== undefined)
+  if (session().pipe !== undefined)
     throw new Error(E_AVAILABLE);
 
   // Output help
@@ -1237,7 +1268,7 @@ async function systems(arg1, arg2, arg3, arg4) {
   const ns = 'cns/' + system + '/';
 
   // Edit in console?
-  if (pipe === undefined) {
+  if (session().pipe === undefined) {
     // Output help
     print('This utility will walk you through setting up system properties.');
     print('It only covers the most common items, and tries to guess sensible defaults.\n');
@@ -1298,7 +1329,7 @@ async function nodes(arg1, arg2, arg3, arg4, arg5) {
   const ns = 'cns/' + system + '/nodes/' + node + '/';
 
   // Edit in console?
-  if (pipe === undefined) {
+  if (session().pipe === undefined) {
     // Output help
     print('This utility will walk you through setting up a system node.');
     print('It only covers the most common items, and tries to guess sensible defaults.\n');
@@ -1363,7 +1394,7 @@ async function contexts(arg1, arg2, arg3, arg4, arg5) {
   const ns = 'cns/' + system + '/nodes/' + node + '/contexts/' + context + '/';
 
   // Edit in console?
-  if (pipe === undefined) {
+  if (session().pipe === undefined) {
     // Output help
     print('This utility will walk you through setting up a node context.');
     print('It only covers the most common items, and tries to guess sensible defaults.\n');
@@ -1449,7 +1480,7 @@ async function providers(arg1, arg2, arg3, arg4, arg5, arg6) {
   var answers = defaults;
 
   // Edit in console?
-  if (pipe === undefined) {
+  if (session().pipe === undefined) {
     // Output help
     print('This utility will walk you through setting up a provider capability.');
     print('It only covers the most common items, and tries to guess sensible defaults.\n');
@@ -1534,7 +1565,7 @@ async function consumers(arg1, arg2, arg3, arg4, arg5, arg6) {
   var answers = defaults;
 
   // Edit in console?
-  if (pipe === undefined) {
+  if (session().pipe === undefined) {
     // Output help
     print('This utility will walk you through setting up a consumer capability.');
     print('It only covers the most common items, and tries to guess sensible defaults.\n');
@@ -1757,13 +1788,13 @@ function find(arg1) {
 
 // Display path
 function pwd() {
-  display('path', namespace);
+  display('path', session().namespace);
 }
 
 // Set path
 function cd(arg1) {
   const loc = argument(arg1, '~');
-  namespace = location(loc);
+  session().namespace = location(loc);
 }
 
 // List keys
@@ -1902,7 +1933,7 @@ async function purge(arg1) {
 
 // Clear screen
 function cls() {
-  if (pipe === undefined)
+  if (session().pipe === undefined)
     console.clear();
 }
 
@@ -1932,7 +1963,7 @@ function echo(...args) {
 // Read from console
 async function ask(arg1, arg2) {
   // Must be console
-  if (pipe !== undefined)
+  if (session().pipe !== undefined)
     throw new Error(E_AVAILABLE);
 
   const prompt = argument(arg1, '');
@@ -1994,7 +2025,7 @@ async function run(arg1) {
 // Terminate program
 async function exit(arg1) {
   // Must be console
-  if (pipe !== undefined)
+  if (session().pipe !== undefined)
     throw new Error(E_AVAILABLE);
 
   const code = argument(arg1, 0) | 0;
@@ -2022,8 +2053,8 @@ function format(root, value) {
   // Valid for output?
   if (value !== undefined && value !== null &&
     (typeof value !== 'object' || Object.keys(value).length > 0)) {
-    // What output format?
-    switch (options.format) {
+    // What output format? Per-session when serving a socket request.
+    switch (session().format ?? options.format) {
       case F_TEXT: return text(root, value, '');
       case F_TREE: return tree(root, value);
       case F_TABLE: return table(root, value);
@@ -2690,49 +2721,35 @@ async function receive(ws, packet) {
     if (!transaction || !cmd)
       throw new Error(E_AVAILABLE);
 
-    // Using format?
-    var oldformat;
+    // Each request runs in its own session: output buffer, namespace and
+    // format are private to this caller, so concurrent clients cannot cross
+    // each other's state (no save/restore of module globals around an await).
+    const store = createSession(ws);
+    store.format = format || options.format;
 
-    if (format) {
-      oldformat = options.format;
-      options.format = format;
-    }
+    const response = await sessions.run(store, async () => {
+      try {
+        await command(cmd);
+      } catch (e) {
+        // Failure
+        broadcast({
+          stats: { errors: ++stats.errors }
+        });
 
-    // Pipe to socket
-    var oldpipe = pipe;
-    var oldbuffer = buffer;
+        display('error', e.message);
+      }
 
-    pipe = ws;
-    buffer = '';
+      // Format as json?
+      if (store.format === F_JSON && store.buffer.startsWith('{'))
+        store.buffer = JSON.parse(store.buffer);
 
-    try {
-      await command(cmd);
-    } catch (e) {
-      // Failure
-      broadcast({
-        stats: { errors: ++stats.errors }
+      // Create response
+      return JSON.stringify({
+        transaction: transaction,
+        format: store.format,
+        response: store.buffer
       });
-
-      display('error', e.message);
-    }
-
-    // Format as json?
-    if (options.format === F_JSON && buffer.startsWith('{'))
-      buffer = JSON.parse(buffer);
-
-    // Create response
-    const response = JSON.stringify({
-      transaction: transaction,
-      format: options.format,
-      response: buffer
     });
-
-    // Restore pipe
-    pipe = oldpipe;//undefined;
-    buffer = oldbuffer;//undefined;
-
-    if (format)
-      options.format = oldformat;
 
     // Send response
     debug('Websocket response: ' + response);
@@ -2761,8 +2778,8 @@ function update(key, value) {
 
 // Buffer pipe response
 function transmit(text) {
-  if (pipe !== undefined) {
-    buffer += text;
+  if (session().pipe !== undefined) {
+    session().buffer += text;
     return true;
   }
   return false;
@@ -2960,7 +2977,7 @@ function print(text) {
 
 // Log debug to console
 function debug(text) {
-  if (options.debug)// && pipe === undefined) // && !transmit(text + '\n'))
+  if (options.debug)// && session().pipe === undefined) // && !transmit(text + '\n'))
     console.debug(text.magenta);
 }
 
