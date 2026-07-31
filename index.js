@@ -42,6 +42,14 @@ const E_CONNECT = 'Not connected';
 const E_AUTH = 'Not authorized';
 const E_FORBIDDEN = 'Command not permitted over socket';
 const E_RELATIVE = 'Absolute key required over socket';
+const E_SCOPE = 'Outside system scope';
+
+// Roles (carried as the `role` claim of the connection's JWT)
+
+const R_PARTICIPANT = 'participant';  // default: own tree only
+const R_OBSERVER = 'observer';        // + read the whole realm
+const R_OPERATOR = 'operator';        // + write/delete anywhere, full command table
+const R_SERVICE = 'service';          // realm-resident infrastructure
 const E_FOUND = 'Not found';
 const E_CACHE = 'Failed to cache';
 const E_WATCH = 'Failed to watch';
@@ -193,6 +201,16 @@ const socketCommands = new Set([
 // reinterpreted by another's cd. Require absolute keys from the wire.
 const socketKeyCommands = new Set(['get', 'put', 'del', 'purge', 'ls']);
 
+// Of those, the ones that MUTATE — scoped to the connection's own tree unless
+// the role permits writing anywhere.
+const socketMutations = new Set(['put', 'del', 'purge']);
+
+// Socket-reachable commands whose FIRST argument is a system id. A participant
+// may only name its own.
+const socketSystemArgCommands = new Set([
+  'systems', 'nodes', 'contexts', 'providers', 'consumers', 'connections'
+]);
+
 // Session state
 //
 // pipe/buffer/namespace/variables used to be module globals shared by the
@@ -207,18 +225,23 @@ const socketKeyCommands = new Set(['get', 'put', 'del', 'purge', 'ls']);
 const sessions = new AsyncLocalStorage();
 
 // Create a session. `pipe` undefined means "write to stdout" (the console).
-function createSession(pipe) {
+// `identity` is the authorization identity pinned to the connection.
+function createSession(pipe, identity) {
   return {
     pipe: pipe,
     buffer: '',
     namespace: undefined,
     variables: {},
-    format: undefined      // per-session output format; falls back to options.format
+    format: undefined,     // per-session output format; falls back to options.format
+    identity: identity || CONSOLE_IDENTITY
   };
 }
 
+// The interactive console is the machine operator — it already has a shell.
+const CONSOLE_IDENTITY = { legacy: true, role: 'operator', system: undefined };
+
 // The interactive console's session.
-const consoleSession = createSession(undefined);
+const consoleSession = createSession(undefined, CONSOLE_IDENTITY);
 
 // Current session — the socket's if we are serving one, else the console's.
 // Callbacks outside any request (etcd watcher, broadcast) resolve to the
@@ -612,24 +635,53 @@ async function command(line) {
     if (fn === undefined)
       throw new Error(E_COMMAND + ': ' + arg);
 
-    // Socket caller: enforce the participant allowlist and reject relative
-    // keys (which would resolve through another client's shared cd state).
+    // Socket caller: enforce role, command allowlist and system scope.
     if (session().pipe !== undefined) {
-      if (!socketCommands.has(name))
+      const identity = session().identity;
+
+      // An operator holds the whole realm anyway, and the dashboard's Console
+      // view is exactly that — a remote console for a realm administrator. Any
+      // lesser role gets the participant allowlist.
+      const console = identity.role === R_OPERATOR && !identity.legacy;
+
+      if (!console && !socketCommands.has(name))
         throw new Error(E_FORBIDDEN + ': ' + arg);
 
       if (socketKeyCommands.has(name) && args[0] !== undefined && !isAbsoluteKey(args[0]))
         throw new Error(E_RELATIVE + ': ' + args[0]);
 
-      // Interim blast-radius guard (full per-system authz is Stage 3): a
-      // subtree purge must target at least a whole system (cns/<systemId>) —
-      // never 'cns' (the entire realm). Self-retraction still works; a
-      // realm-wide wipe does not. Does NOT stop targeting a *known* other
-      // system — that needs connection identity.
+      // Blast-radius guard: a subtree purge must target at least a whole
+      // system (cns/<systemId>) — never 'cns' (the entire realm).
       if (name === 'purge' && args[0] !== undefined) {
         const depth = wildcard(args[0]).split('/').filter(Boolean).length;
         if (depth < 2)
           throw new Error(E_FORBIDDEN + ': purge above system scope');
+      }
+
+      // System scope. Writes and reads are gated separately: an observer may
+      // read the whole realm but still only write its own tree.
+      const inOwnTree = (loc) => {
+        const key = wildcard(loc);
+        return key === 'cns/' + identity.system || key.startsWith(ownPrefix(identity));
+      };
+
+      // --- mutations: own tree only, unless the role writes anywhere ---
+      if (!mayWriteAll(identity)) {
+        if (socketMutations.has(name) && args[0] !== undefined && !inOwnTree(args[0]))
+          throw new Error(E_SCOPE + ': ' + args[0]);
+
+        // Structural commands take the system id as their first argument
+        // (systems <id> …, nodes <id> …, contexts <id> …, providers <id> …).
+        if (socketSystemArgCommands.has(name) && args[0] !== undefined &&
+          args[0] !== identity.system)
+          throw new Error(E_SCOPE + ': ' + args[0]);
+      }
+
+      // --- reads: own tree only, unless the role sees the whole realm ---
+      if (!maySeeAll(identity)) {
+        if (socketKeyCommands.has(name) && !socketMutations.has(name) &&
+          args[0] !== undefined && wildcard(args[0]) !== 'cns' && !inOwnTree(args[0]))
+          throw new Error(E_SCOPE + ': ' + args[0]);
       }
     }
 
@@ -2556,10 +2608,13 @@ function extractToken(headers) {
 }
 
 // Verify dashboard bearer token
+// done(ok, claims). `claims` is the verified JWT payload when one was
+// presented, otherwise undefined — which means "legacy": no identity, no role,
+// and the permissive pre-authorization behaviour (see identityOf).
 function verifyToken(headers, done) {
   // Auth disabled?
   if (config.dashboardSecret === '') {
-    done(true);
+    done(true, undefined);
     return;
   }
 
@@ -2567,14 +2622,74 @@ function verifyToken(headers, done) {
   const token = extractToken(headers);
 
   if (token === undefined) {
-    done(false);
+    done(false, undefined);
     return;
   }
 
   // Verify token
-  jwt.verify(token, config.dashboardSecret, { algorithms: ['HS256'] }, (e) => {
-    done(!e);
+  jwt.verify(token, config.dashboardSecret, { algorithms: ['HS256'] }, (e, payload) => {
+    done(!e, e ? undefined : payload);
   });
+}
+
+// Authorization identity for a connection, derived from verified JWT claims.
+//
+//   sys   the system this connection may act as. '*' (or absent, legacy)
+//         means unrestricted — see below.
+//   role  participant | observer | operator | service. Absent = participant.
+//
+// A token carrying no `sys` claim is treated as LEGACY and keeps the old
+// unrestricted behaviour, so existing deployments do not break the moment this
+// ships. Tokens SHOULD carry sys:'*' explicitly to mean realm-wide, so that
+// absence can later become deny without changing the meaning of tokens already
+// issued.
+function identityOf(claims) {
+  if (claims === undefined || claims === null)
+    return { legacy: true, role: R_PARTICIPANT, system: undefined };
+
+  const system = claims.sys ?? claims.system ?? claims.systemId;
+  const role = claims.role ?? R_PARTICIPANT;
+
+  // No system claim, or explicit wildcard: unscoped.
+  if (system === undefined || system === null || system === '*')
+    return { legacy: system === undefined || system === null, role, system: undefined };
+
+  return { legacy: false, role, system: String(system) };
+}
+
+// May this identity see/act outside its own system tree?
+function isPrivileged(identity) {
+  return identity.role === R_OBSERVER || identity.role === R_OPERATOR || identity.role === R_SERVICE;
+}
+
+// Full read of the realm?
+function maySeeAll(identity) {
+  return identity.legacy || identity.system === undefined || isPrivileged(identity);
+}
+
+// Write/delete outside own tree?
+function mayWriteAll(identity) {
+  return identity.legacy || identity.system === undefined ||
+    identity.role === R_OPERATOR || identity.role === R_SERVICE;
+}
+
+// The key prefix this identity owns.
+function ownPrefix(identity) {
+  return 'cns/' + identity.system + '/';
+}
+
+// Filter a key set to what this identity may see.
+function visibleKeys(keys, identity) {
+  if (maySeeAll(identity)) return keys;
+
+  const prefix = ownPrefix(identity);
+  const out = {};
+
+  for (const key in keys) {
+    if (key === undefined) continue;
+    if (key.startsWith(prefix)) out[key] = keys[key];
+  }
+  return out;
 }
 
 // Authorize dashboard HTTP request
@@ -2657,7 +2772,10 @@ function start(host, port) {
         wsOptions: {
           // Reject unauthorized upgrades before the handshake completes
           verifyClient: (info, cb) => {
-            verifyToken(info.req.headers, (ok) => {
+            verifyToken(info.req.headers, (ok, claims) => {
+              // Stash the verified claims on the upgrade request; the ws route
+              // below reads them to pin this connection's identity and role.
+              if (ok) info.req.cnsClaims = claims;
               cb(ok, ok ? undefined : 401, ok ? undefined : E_AUTH);
             });
           }
@@ -2666,6 +2784,14 @@ function start(host, port) {
 
       // Web socket request
       app.ws('/', async (ws, req) => {
+        // Pin this connection's identity for its lifetime. Every request on
+        // this socket is authorized against it; it cannot be changed by
+        // anything the client sends.
+        ws.cnsIdentity = identityOf(req.cnsClaims);
+
+        debug('Websocket identity: ' + (ws.cnsIdentity.system || (ws.cnsIdentity.legacy ? 'legacy/unscoped' : 'unscoped')) +
+          ' role=' + ws.cnsIdentity.role);
+
         // Receive
         ws.on('message', async (packet) => {
           debug('Websocket request: ' + packet);
@@ -2683,10 +2809,11 @@ function start(host, port) {
         // Initial changes
         debug('Websocket connect...');
 
+        // Initial snapshot — scoped to what this connection may see.
         ws.send(JSON.stringify({
           version: pack.version,
           stats: stats,
-          keys: cache
+          keys: visibleKeys(cache, ws.cnsIdentity)
         }));
       });
 
@@ -2724,7 +2851,7 @@ async function receive(ws, packet) {
     // Each request runs in its own session: output buffer, namespace and
     // format are private to this caller, so concurrent clients cannot cross
     // each other's state (no save/restore of module globals around an await).
-    const store = createSession(ws);
+    const store = createSession(ws, ws.cnsIdentity);
     store.format = format || options.format;
 
     const response = await sessions.run(store, async () => {
@@ -2790,12 +2917,39 @@ function broadcast(changes) {
   if (wss === undefined) return;
 
   try {
-    // Stringify packet
-    const packet = JSON.stringify(changes);
+    // Key changes are scoped per connection, so each client is sent its own
+    // packet. Everything else (stats, version) is realm-wide and shared.
+    const shared = changes.keys === undefined ? JSON.stringify(changes) : undefined;
 
-    // Broadcast to all clients
     wss.clients.forEach((ws) => {
-      ws.send(packet);
+      try {
+        if (shared !== undefined) {
+          ws.send(shared);
+          return;
+        }
+
+        const identity = ws.cnsIdentity || CONSOLE_IDENTITY;
+        const keys = visibleKeys(changes.keys, identity);
+
+        // CRITICAL: never send an empty `keys` object. The client-side merge
+        // treats an empty object as a RESET (`Object.keys(value).length === 0
+        // -> target[key] = {}`), so a change this client may not see would
+        // wipe its entire cache. Send the rest of the packet without a keys
+        // field instead, or nothing at all.
+        if (Object.keys(keys).length === 0) {
+          const rest = { ...changes };
+          delete rest.keys;
+
+          if (Object.keys(rest).length === 0) return;
+          ws.send(JSON.stringify(rest));
+          return;
+        }
+
+        ws.send(JSON.stringify({ ...changes, keys: keys }));
+      } catch (e) {
+        // One bad client must not stop the rest
+        debug(e.message);
+      }
     });
   } catch (e) {
     // Failure
