@@ -22,6 +22,8 @@ const http = require('http');
 const https = require('https');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
+const { AsyncLocalStorage } = require('async_hooks');
 
 const pack = require('./package.json');
 
@@ -39,6 +41,23 @@ const E_CONFIG = 'Not configured';
 const E_AVAILABLE = 'Not available';
 const E_CONNECT = 'Not connected';
 const E_AUTH = 'Not authorized';
+const E_FORBIDDEN = 'Command not permitted over socket';
+const E_RELATIVE = 'Absolute key required over socket';
+const E_SCOPE = 'Outside system scope';
+
+// Roles (carried as the `role` claim of the connection's JWT)
+
+const R_PARTICIPANT = 'participant';  // default: own tree only
+const R_OBSERVER = 'observer';        // + read the whole realm
+const R_OPERATOR = 'operator';        // + write/delete anywhere, full command table
+const R_SERVICE = 'service';          // realm-resident infrastructure
+const R_ENROL = 'enrol';              // NOTHING except exchange itself for a participant token
+
+// Enrolment records live OUTSIDE the 'cns' prefix, so they are never in the
+// key cache, never in a snapshot and never broadcast. Only a hash of each
+// issued token is stored — the token itself is returned once and never kept.
+const ENROL_PREFIX = 'auth/enrolments/';
+const CLAIM_PREFIX = 'auth/systems/';
 const E_FOUND = 'Not found';
 const E_CACHE = 'Failed to cache';
 const E_WATCH = 'Failed to watch';
@@ -81,7 +100,8 @@ const defaults = {
   password: '',
   profiles: 'https://cp.padi.io/profiles',
   connect_timeout: '10000',
-  dashboardSecret: ''
+  dashboardSecret: '',
+  trustProxy: 1
 };
 
 // Configuration
@@ -93,7 +113,11 @@ const config = {
   password: process.env.CNS_PASSWORD || defaults.password,
   profiles: process.env.CNS_PROFILES || defaults.profiles,
   connect_timeout: parseInt(process.env.CONNECT_TIMEOUT || defaults.connect_timeout),
-  dashboardSecret: process.env.CNS_DASHBOARD_SECRET || defaults.dashboardSecret
+  dashboardSecret: process.env.CNS_DASHBOARD_SECRET || defaults.dashboardSecret,
+  // Hops (or subnet list) of trusted reverse proxy in front of the dashboard.
+  // Needed so req.secure reflects X-Forwarded-Proto behind a TLS-terminating
+  // ingress; see the 'trust proxy' note in start().
+  trustProxy: process.env.CNS_TRUST_PROXY ?? defaults.trustProxy
 };
 
 // Options
@@ -146,6 +170,9 @@ const commands = {
   'put': put,
   'del': del,
   'purge': purge,
+  'enrol': enrol,
+  'enroll': enrol,
+  'revoke': revoke,
   'cls': cls,
   'echo': echo,
   'ask': ask,
@@ -174,6 +201,75 @@ const shortcuts = {
   'q': 'quit'
 };
 
+// Commands a remote (websocket) caller may invoke. Everything else — eval,
+// curl, run, connect/disconnect, dashboard, output, cd, init, ... — is
+// console-only. This is an ALLOWLIST by design: new CLI conveniences are not
+// silently reachable over the wire. See receive()/command() for enforcement.
+const socketCommands = new Set([
+  'systems', 'nodes', 'contexts', 'providers', 'consumers', 'connections',
+  'get', 'put', 'del', 'purge',
+  'ls', 'map', 'find', 'status', 'version', 'help',
+  'enrol', 'enroll', 'revoke'
+]);
+
+// The ONLY commands an enrolment credential may invoke.
+const enrolCommands = new Set(['enrol', 'enroll', 'help', 'version']);
+
+// Socket-reachable commands whose first argument is a key that must be
+// absolute — relative keys resolve through the shared `namespace` (cd), which
+// is global across all sockets, so a relative key from one client can be
+// reinterpreted by another's cd. Require absolute keys from the wire.
+const socketKeyCommands = new Set(['get', 'put', 'del', 'purge', 'ls']);
+
+// Of those, the ones that MUTATE — scoped to the connection's own tree unless
+// the role permits writing anywhere.
+const socketMutations = new Set(['put', 'del', 'purge']);
+
+// Socket-reachable commands whose FIRST argument is a system id. A participant
+// may only name its own.
+const socketSystemArgCommands = new Set([
+  'systems', 'nodes', 'contexts', 'providers', 'consumers', 'connections'
+]);
+
+// Session state
+//
+// pipe/buffer/namespace/variables used to be module globals shared by the
+// console AND every websocket client. Two concurrent socket callers could
+// therefore cross each other's output (receive() saved and restored `pipe`
+// around an `await`, which yields), and one caller's `cd` changed how another
+// caller's relative keys resolved. Each socket connection now gets its own
+// session; the console keeps one of its own. AsyncLocalStorage carries the
+// current session across awaits without threading an argument through every
+// command function.
+
+const sessions = new AsyncLocalStorage();
+
+// Create a session. `pipe` undefined means "write to stdout" (the console).
+// `identity` is the authorization identity pinned to the connection.
+function createSession(pipe, identity) {
+  return {
+    pipe: pipe,
+    buffer: '',
+    namespace: undefined,
+    variables: {},
+    format: undefined,     // per-session output format; falls back to options.format
+    identity: identity || CONSOLE_IDENTITY
+  };
+}
+
+// The interactive console is the machine operator — it already has a shell.
+const CONSOLE_IDENTITY = { legacy: true, role: 'operator', system: undefined };
+
+// The interactive console's session.
+const consoleSession = createSession(undefined, CONSOLE_IDENTITY);
+
+// Current session — the socket's if we are serving one, else the console's.
+// Callbacks outside any request (etcd watcher, broadcast) resolve to the
+// console session, which is correct: they print to stdout.
+function session() {
+  return sessions.getStore() || consoleSession;
+}
+
 // Local data
 
 var client;
@@ -182,14 +278,11 @@ var profiles;
 var cache;
 var watcher;
 
-var variables;
 
 var server;
 var wss;
 
 var calls;
-var pipe;
-var buffer;
 
 var terminal;
 var completions;
@@ -197,13 +290,12 @@ var confirm;
 var signal;
 var reply;
 
-var namespace;
 
 // Local functions
 
 // Main entry point
 async function main(argv) {
-  variables = {};
+  session().variables = {};
 
   try {
     // Parse options
@@ -511,8 +603,11 @@ function close() {
 
 // Parse command
 async function command(line) {
-  // Expression eval?
+  // Expression eval? Console only — a socket caller must never reach eval,
+  // even when debug is on (which itself is no longer socket-settable).
   if (options.debug && line.startsWith('!')) {
+    if (session().pipe !== undefined)
+      throw new Error(E_FORBIDDEN + ': !');
     console.log(eval(line.substr(1)));
     return;
   }
@@ -540,20 +635,79 @@ async function command(line) {
 
     // Variable assign?
     if (cmd.startsWith('$')) {
+      // Variables are a shared global — not writable from the wire.
+      if (session().pipe !== undefined)
+        throw new Error(E_FORBIDDEN + ': ' + arg);
+
       const name = cmd.substr(1);
 
       if (args[0] === '=' && len < 3) {
-        variables[name] = argument(args[1], '');
+        session().variables[name] = argument(args[1], '');
         return;
       }
       throw new Error(E_ASSIGN);
     }
 
     // Get command handler?
-    const fn = commands[shortcuts[cmd] || cmd];
+    const name = shortcuts[cmd] || cmd;
+    const fn = commands[name];
 
     if (fn === undefined)
       throw new Error(E_COMMAND + ': ' + arg);
+
+    // Socket caller: enforce role, command allowlist and system scope.
+    if (session().pipe !== undefined) {
+      const identity = session().identity;
+
+      // An operator holds the whole realm anyway, and the dashboard's Console
+      // view is exactly that — a remote console for a realm administrator. Any
+      // lesser role gets the participant allowlist.
+      const console = identity.role === R_OPERATOR && !identity.legacy;
+
+      // An enrolment credential can do exactly one thing.
+      if (identity.role === R_ENROL && !enrolCommands.has(name))
+        throw new Error(E_FORBIDDEN + ': enrolment credential may only enrol');
+
+      if (!console && !socketCommands.has(name))
+        throw new Error(E_FORBIDDEN + ': ' + arg);
+
+      if (socketKeyCommands.has(name) && args[0] !== undefined && !isAbsoluteKey(args[0]))
+        throw new Error(E_RELATIVE + ': ' + args[0]);
+
+      // Blast-radius guard: a subtree purge must target at least a whole
+      // system (cns/<systemId>) — never 'cns' (the entire realm).
+      if (name === 'purge' && args[0] !== undefined) {
+        const depth = wildcard(args[0]).split('/').filter(Boolean).length;
+        if (depth < 2)
+          throw new Error(E_FORBIDDEN + ': purge above system scope');
+      }
+
+      // System scope. Writes and reads are gated separately: an observer may
+      // read the whole realm but still only write its own tree.
+      const inOwnTree = (loc) => {
+        const key = wildcard(loc);
+        return key === 'cns/' + identity.system || key.startsWith(ownPrefix(identity));
+      };
+
+      // --- mutations: own tree only, unless the role writes anywhere ---
+      if (!mayWriteAll(identity)) {
+        if (socketMutations.has(name) && args[0] !== undefined && !inOwnTree(args[0]))
+          throw new Error(E_SCOPE + ': ' + args[0]);
+
+        // Structural commands take the system id as their first argument
+        // (systems <id> …, nodes <id> …, contexts <id> …, providers <id> …).
+        if (socketSystemArgCommands.has(name) && args[0] !== undefined &&
+          args[0] !== identity.system)
+          throw new Error(E_SCOPE + ': ' + args[0]);
+      }
+
+      // --- reads: own tree only, unless the role sees the whole realm ---
+      if (!maySeeAll(identity)) {
+        if (socketKeyCommands.has(name) && !socketMutations.has(name) &&
+          args[0] !== undefined && wildcard(args[0]) !== 'cns' && !inOwnTree(args[0]))
+          throw new Error(E_SCOPE + ': ' + args[0]);
+      }
+    }
 
     // Too many args?
     if (cmd !== '?' && cmd !== 'echo' && len > fn.length)
@@ -651,7 +805,7 @@ function variable(value) {
         break;
       case 'path':
         // Current path
-        data = namespace;
+        data = session().namespace;
         break;
       case 'ask':
         // Ask reply
@@ -664,7 +818,7 @@ function variable(value) {
         if (data === undefined) data = config[name];
         if (data === undefined) data = options[name];
         if (data === undefined) data = stats[name];
-        if (data === undefined) data = variables[name];
+        if (data === undefined) data = session().variables[name];
         break;
     }
 
@@ -723,11 +877,11 @@ function escape(value) {
         break;
       case 'w':
         // Path
-        data = client ? shorten(namespace) : '';
+        data = client ? shorten(session().namespace) : '';
         break;
       case 'W':
         // Directory
-        data = client ? namespace.split('/').pop() : '';
+        data = client ? session().namespace.split('/').pop() : '';
         break;
       case 'A':
         // Timestamp
@@ -766,6 +920,15 @@ function location(loc) {
   return wildcard(loc);
 }
 
+// Is this key absolute (independent of the shared `namespace`)? Mirrors the
+// absoluteness rules in wildcard(): a leading '/', a '~' home path, or a
+// path already rooted at 'cns'.
+function isAbsoluteKey(loc) {
+  if (typeof loc !== 'string' || loc === '') return false;
+  const expanded = expand(loc);
+  return expanded.startsWith('/') || expanded.split('/')[0] === 'cns';
+}
+
 // Get wildcard path
 function wildcard(loc) {
   // Absolute path?
@@ -780,7 +943,7 @@ function wildcard(loc) {
     absolute = true;
 
   // Relative path?
-  if (!absolute) loc = (namespace ? (namespace + '/') : '') + loc;
+  if (!absolute) loc = (session().namespace ? (session().namespace + '/') : '') + loc;
 
   // Normalize path
   loc = path.normalize(loc);
@@ -884,7 +1047,7 @@ function help() {
   print('  quit                                   Quit the console');
 
   // Console mode?
-  if (terminal !== undefined && pipe === undefined)
+  if (terminal !== undefined && session().pipe === undefined)
     print('\nPress Ctrl+C to abort current command, Ctrl+D to exit the console.');
 }
 
@@ -918,7 +1081,7 @@ function dashboard(arg1) {
 // Init environment
 async function init() {
   // Must be console
-  if (pipe !== undefined)
+  if (session().pipe !== undefined)
     throw new Error(E_AVAILABLE);
 
   // Output help
@@ -1181,7 +1344,7 @@ async function systems(arg1, arg2, arg3, arg4) {
   const ns = 'cns/' + system + '/';
 
   // Edit in console?
-  if (pipe === undefined) {
+  if (session().pipe === undefined) {
     // Output help
     print('This utility will walk you through setting up system properties.');
     print('It only covers the most common items, and tries to guess sensible defaults.\n');
@@ -1242,7 +1405,7 @@ async function nodes(arg1, arg2, arg3, arg4, arg5) {
   const ns = 'cns/' + system + '/nodes/' + node + '/';
 
   // Edit in console?
-  if (pipe === undefined) {
+  if (session().pipe === undefined) {
     // Output help
     print('This utility will walk you through setting up a system node.');
     print('It only covers the most common items, and tries to guess sensible defaults.\n');
@@ -1307,7 +1470,7 @@ async function contexts(arg1, arg2, arg3, arg4, arg5) {
   const ns = 'cns/' + system + '/nodes/' + node + '/contexts/' + context + '/';
 
   // Edit in console?
-  if (pipe === undefined) {
+  if (session().pipe === undefined) {
     // Output help
     print('This utility will walk you through setting up a node context.');
     print('It only covers the most common items, and tries to guess sensible defaults.\n');
@@ -1393,7 +1556,7 @@ async function providers(arg1, arg2, arg3, arg4, arg5, arg6) {
   var answers = defaults;
 
   // Edit in console?
-  if (pipe === undefined) {
+  if (session().pipe === undefined) {
     // Output help
     print('This utility will walk you through setting up a provider capability.');
     print('It only covers the most common items, and tries to guess sensible defaults.\n');
@@ -1478,7 +1641,7 @@ async function consumers(arg1, arg2, arg3, arg4, arg5, arg6) {
   var answers = defaults;
 
   // Edit in console?
-  if (pipe === undefined) {
+  if (session().pipe === undefined) {
     // Output help
     print('This utility will walk you through setting up a consumer capability.');
     print('It only covers the most common items, and tries to guess sensible defaults.\n');
@@ -1701,13 +1864,13 @@ function find(arg1) {
 
 // Display path
 function pwd() {
-  display('path', namespace);
+  display('path', session().namespace);
 }
 
 // Set path
 function cd(arg1) {
   const loc = argument(arg1, '~');
-  namespace = location(loc);
+  session().namespace = location(loc);
 }
 
 // List keys
@@ -1800,6 +1963,136 @@ async function put(arg1, arg2) {
   });
 }
 
+// Exchange this connection's credential for a participant token bound to a
+// system id — the automated enrolment path.
+//
+//   enrol <systemId>
+//
+// Properties:
+//   * ATTENUATING — the result is always `participant`, never more than the
+//     caller holds. An enrolment credential can therefore be distributed
+//     (installers, device images, app config) without granting anything.
+//   * FIRST CLAIM WINS — once a system id has been enrolled it cannot be
+//     enrolled again, so a widely-distributed enrolment token cannot be used
+//     to impersonate a system that already exists. An operator may re-issue.
+//   * OPAQUE — the issued token is random, not a signed assertion. Only its
+//     hash is stored, so it is individually revocable (which shared-secret
+//     JWTs are not), and the realm needs no signing key to mint it.
+async function enrol(arg1) {
+  // Must be connected
+  if (client === undefined)
+    throw new Error(E_CONNECT);
+
+  const identity = session().identity;
+  const system = required(arg1);
+
+  if (!/^[A-Za-z0-9._-]{1,64}$/.test(system))
+    throw new Error(E_ARGUMENT + ': ' + system);
+
+  // Who may exchange: an enrolment credential, or an operator issuing on
+  // someone's behalf. Everyone else already has an identity.
+  const isOperator = identity.role === R_OPERATOR && !identity.legacy;
+
+  if (identity.role !== R_ENROL && !isOperator)
+    throw new Error(E_FORBIDDEN + ': enrol requires an enrolment or operator credential');
+
+  // An enrolment credential MAY carry a sys claim. When it does it is a
+  // voucher for exactly that system and nothing else — so a leaked voucher is
+  // worth only the one system, and cannot be used to pre-emptively claim an
+  // id belonging to a device that has not come online yet. Without a sys
+  // claim it is a general voucher: any system not already enrolled.
+  if (identity.role === R_ENROL && identity.system !== undefined &&
+    identity.system !== system)
+    throw new Error(E_SCOPE + ': this enrolment credential may only enrol ' + identity.system);
+
+  // First claim wins.
+  const claimKey = CLAIM_PREFIX + system;
+  const claimed = await client.get(claimKey).string()
+    .catch((e) => { throw new Error(E_GET + ': ' + e.message); });
+
+  if (claimed !== null && !isOperator)
+    throw new Error(E_FORBIDDEN + ': system ' + system + ' is already enrolled');
+
+  // Mint an opaque token; store only its hash.
+  const token = crypto.randomBytes(32).toString('base64url');
+  const hash = crypto.createHash('sha256').update(token).digest('hex');
+
+  const record = {
+    system: system,
+    role: R_PARTICIPANT,
+    issued: toTimestamp(),
+    revoked: false
+  };
+
+  await client.put(ENROL_PREFIX + hash).value(JSON.stringify(record))
+    .catch((e) => { throw new Error(E_PUT + ': ' + e.message); });
+
+  await client.put(claimKey).value(hash)
+    .catch((e) => { throw new Error(E_PUT + ': ' + e.message); });
+
+  display('enrolment', {
+    system: system,
+    role: R_PARTICIPANT,
+    token: token
+  });
+}
+
+// Revoke an enrolled system's credential (operator only).
+async function revoke(arg1) {
+  if (client === undefined)
+    throw new Error(E_CONNECT);
+
+  const identity = session().identity;
+
+  if (session().pipe !== undefined && !(identity.role === R_OPERATOR && !identity.legacy))
+    throw new Error(E_FORBIDDEN + ': revoke requires an operator credential');
+
+  const system = required(arg1);
+  const claimKey = CLAIM_PREFIX + system;
+
+  const hash = await client.get(claimKey).string()
+    .catch((e) => { throw new Error(E_GET + ': ' + e.message); });
+
+  if (hash === null) throw new Error(E_FOUND + ': ' + system);
+
+  const raw = await client.get(ENROL_PREFIX + hash).string()
+    .catch((e) => { throw new Error(E_GET + ': ' + e.message); });
+
+  const record = raw === null ? { system: system } : JSON.parse(raw);
+  record.revoked = true;
+  record.role = R_PARTICIPANT;
+
+  await client.put(ENROL_PREFIX + hash).value(JSON.stringify(record))
+    .catch((e) => { throw new Error(E_PUT + ': ' + e.message); });
+
+  // Free the claim so the system can be enrolled afresh.
+  await client.delete().key(claimKey)
+    .catch((e) => { throw new Error(E_DEL + ': ' + e.message); });
+
+  display('revoked', { system: system });
+}
+
+// Look up an opaque enrolment token. Returns claims-shaped data or undefined.
+async function lookupEnrolment(token) {
+  if (client === undefined) return undefined;
+
+  const hash = crypto.createHash('sha256').update(token).digest('hex');
+
+  const raw = await client.get(ENROL_PREFIX + hash).string().catch(() => null);
+  if (raw === null) return undefined;
+
+  let record;
+  try {
+    record = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+
+  if (record.revoked) return undefined;
+
+  return { sys: record.system, role: record.role || R_PARTICIPANT, sub: 'enrolled' };
+}
+
 // Delete key
 async function del(arg1) {
   // Must be connected
@@ -1846,7 +2139,7 @@ async function purge(arg1) {
 
 // Clear screen
 function cls() {
-  if (pipe === undefined)
+  if (session().pipe === undefined)
     console.clear();
 }
 
@@ -1876,7 +2169,7 @@ function echo(...args) {
 // Read from console
 async function ask(arg1, arg2) {
   // Must be console
-  if (pipe !== undefined)
+  if (session().pipe !== undefined)
     throw new Error(E_AVAILABLE);
 
   const prompt = argument(arg1, '');
@@ -1938,7 +2231,7 @@ async function run(arg1) {
 // Terminate program
 async function exit(arg1) {
   // Must be console
-  if (pipe !== undefined)
+  if (session().pipe !== undefined)
     throw new Error(E_AVAILABLE);
 
   const code = argument(arg1, 0) | 0;
@@ -1966,8 +2259,8 @@ function format(root, value) {
   // Valid for output?
   if (value !== undefined && value !== null &&
     (typeof value !== 'object' || Object.keys(value).length > 0)) {
-    // What output format?
-    switch (options.format) {
+    // What output format? Per-session when serving a socket request.
+    switch (session().format ?? options.format) {
       case F_TEXT: return text(root, value, '');
       case F_TREE: return tree(root, value);
       case F_TABLE: return table(root, value);
@@ -2469,10 +2762,13 @@ function extractToken(headers) {
 }
 
 // Verify dashboard bearer token
+// done(ok, claims). `claims` is the verified JWT payload when one was
+// presented, otherwise undefined — which means "legacy": no identity, no role,
+// and the permissive pre-authorization behaviour (see identityOf).
 function verifyToken(headers, done) {
   // Auth disabled?
   if (config.dashboardSecret === '') {
-    done(true);
+    done(true, undefined);
     return;
   }
 
@@ -2480,14 +2776,87 @@ function verifyToken(headers, done) {
   const token = extractToken(headers);
 
   if (token === undefined) {
-    done(false);
+    done(false, undefined);
     return;
   }
 
-  // Verify token
-  jwt.verify(token, config.dashboardSecret, { algorithms: ['HS256'] }, (e) => {
-    done(!e);
+  // Verify token — a signed assertion from the issuer, or an opaque
+  // enrolment-issued token that this realm minted and stores the hash of.
+  jwt.verify(token, config.dashboardSecret, { algorithms: ['HS256'] }, (e, payload) => {
+    if (!e) {
+      done(true, payload);
+      return;
+    }
+
+    lookupEnrolment(token)
+      .then((claims) => done(claims !== undefined, claims))
+      .catch(() => done(false, undefined));
   });
+}
+
+// Authorization identity for a connection, derived from verified JWT claims.
+//
+//   sys   the system this connection may act as. '*' (or absent, legacy)
+//         means unrestricted — see below.
+//   role  participant | observer | operator | service. Absent = participant.
+//
+// A token carrying no `sys` claim is treated as LEGACY and keeps the old
+// unrestricted behaviour, so existing deployments do not break the moment this
+// ships. Tokens SHOULD carry sys:'*' explicitly to mean realm-wide, so that
+// absence can later become deny without changing the meaning of tokens already
+// issued.
+function identityOf(claims) {
+  if (claims === undefined || claims === null)
+    return { legacy: true, role: R_PARTICIPANT, system: undefined };
+
+  const system = claims.sys ?? claims.system ?? claims.systemId;
+  const role = claims.role ?? R_PARTICIPANT;
+
+  // No system claim, or explicit wildcard: unscoped.
+  if (system === undefined || system === null || system === '*')
+    return { legacy: system === undefined || system === null, role, system: undefined };
+
+  return { legacy: false, role, system: String(system) };
+}
+
+// May this identity see/act outside its own system tree?
+function isPrivileged(identity) {
+  return identity.role === R_OBSERVER || identity.role === R_OPERATOR || identity.role === R_SERVICE;
+}
+
+// Full read of the realm?
+function maySeeAll(identity) {
+  if (identity.role === R_ENROL) return false;   // enrolment sees nothing
+  return identity.legacy || identity.system === undefined || isPrivileged(identity);
+}
+
+// Write/delete outside own tree?
+function mayWriteAll(identity) {
+  if (identity.role === R_ENROL) return false;
+  return identity.legacy || identity.system === undefined ||
+    identity.role === R_OPERATOR || identity.role === R_SERVICE;
+}
+
+// The key prefix this identity owns.
+function ownPrefix(identity) {
+  return 'cns/' + identity.system + '/';
+}
+
+// Filter a key set to what this identity may see.
+function visibleKeys(keys, identity) {
+  // An enrolment credential is not a participant: it has no tree and sees
+  // nothing. Its sole power is to exchange itself (see the `enrol` command).
+  if (identity.role === R_ENROL) return {};
+  if (maySeeAll(identity)) return keys;
+
+  const prefix = ownPrefix(identity);
+  const out = {};
+
+  for (const key in keys) {
+    if (key === undefined) continue;
+    if (key.startsWith(prefix)) out[key] = keys[key];
+  }
+  return out;
 }
 
 // Authorize dashboard HTTP request
@@ -2515,6 +2884,18 @@ function start(host, port) {
   // Initialize express
   const app = new express();
 
+  // Behind an ingress that terminates TLS, the connection into this process is
+  // plain HTTP, so req.secure is false and the session cookie would be issued
+  // WITHOUT the Secure flag — i.e. sendable over plaintext. Trusting the proxy
+  // makes req.secure reflect X-Forwarded-Proto instead.
+  //
+  // CNS_TRUST_PROXY: number of hops, a comma-separated subnet list, or 'false'
+  // to disable. Defaults to 1 (a single ingress in front of us). Only set this
+  // when something trustworthy really is in front — a trusted proxy setting
+  // lets a client spoof X-Forwarded-* otherwise.
+  if (config.trustProxy !== false && config.trustProxy !== 'false')
+    app.set('trust proxy', config.trustProxy);
+
   app.use(compression());
   app.use(express.urlencoded({ extended: false }));
 
@@ -2535,21 +2916,38 @@ function start(host, port) {
 
     const token = (req.body.token || '').trim();
 
-    jwt.verify(token, config.dashboardSecret, { algorithms: ['HS256'] }, (e) => {
+    jwt.verify(token, config.dashboardSecret, { algorithms: ['HS256'] }, (e, payload) => {
       if (e) {
         res.redirect('/login?error=1');
         return;
       }
 
       // Store token as a cookie so the browser sends it on every request,
-      // including the WebSocket handshake
-      res.cookie(DASHBOARD_COOKIE, token, {
+      // including the WebSocket handshake.
+      //
+      // The cookie must not outlive the token it carries: an expired JWT in a
+      // still-valid cookie produces a rejected request rather than a clean
+      // trip back to the login page. Follow the token's own exp; fall back to
+      // a year only for a token that never expires.
+      const opts = {
         httpOnly: true,
         sameSite: 'lax',
         secure: req.secure,
-        path: '/',
-        maxAge: 365 * 24 * 60 * 60 * 1000
-      });
+        path: '/'
+      };
+
+      if (payload && payload.exp) {
+        const ms = payload.exp * 1000 - Date.now();
+        if (ms <= 0) {
+          res.redirect('/login?error=1');
+          return;
+        }
+        opts.maxAge = ms;
+      } else {
+        opts.maxAge = 365 * 24 * 60 * 60 * 1000;
+      }
+
+      res.cookie(DASHBOARD_COOKIE, token, opts);
       res.redirect('/');
     });
   });
@@ -2570,7 +2968,10 @@ function start(host, port) {
         wsOptions: {
           // Reject unauthorized upgrades before the handshake completes
           verifyClient: (info, cb) => {
-            verifyToken(info.req.headers, (ok) => {
+            verifyToken(info.req.headers, (ok, claims) => {
+              // Stash the verified claims on the upgrade request; the ws route
+              // below reads them to pin this connection's identity and role.
+              if (ok) info.req.cnsClaims = claims;
               cb(ok, ok ? undefined : 401, ok ? undefined : E_AUTH);
             });
           }
@@ -2579,6 +2980,14 @@ function start(host, port) {
 
       // Web socket request
       app.ws('/', async (ws, req) => {
+        // Pin this connection's identity for its lifetime. Every request on
+        // this socket is authorized against it; it cannot be changed by
+        // anything the client sends.
+        ws.cnsIdentity = identityOf(req.cnsClaims);
+
+        debug('Websocket identity: ' + (ws.cnsIdentity.system || (ws.cnsIdentity.legacy ? 'legacy/unscoped' : 'unscoped')) +
+          ' role=' + ws.cnsIdentity.role);
+
         // Receive
         ws.on('message', async (packet) => {
           debug('Websocket request: ' + packet);
@@ -2596,10 +3005,11 @@ function start(host, port) {
         // Initial changes
         debug('Websocket connect...');
 
+        // Initial snapshot — scoped to what this connection may see.
         ws.send(JSON.stringify({
           version: pack.version,
           stats: stats,
-          keys: cache
+          keys: visibleKeys(cache, ws.cnsIdentity)
         }));
       });
 
@@ -2634,49 +3044,35 @@ async function receive(ws, packet) {
     if (!transaction || !cmd)
       throw new Error(E_AVAILABLE);
 
-    // Using format?
-    var oldformat;
+    // Each request runs in its own session: output buffer, namespace and
+    // format are private to this caller, so concurrent clients cannot cross
+    // each other's state (no save/restore of module globals around an await).
+    const store = createSession(ws, ws.cnsIdentity);
+    store.format = format || options.format;
 
-    if (format) {
-      oldformat = options.format;
-      options.format = format;
-    }
+    const response = await sessions.run(store, async () => {
+      try {
+        await command(cmd);
+      } catch (e) {
+        // Failure
+        broadcast({
+          stats: { errors: ++stats.errors }
+        });
 
-    // Pipe to socket
-    var oldpipe = pipe;
-    var oldbuffer = buffer;
+        display('error', e.message);
+      }
 
-    pipe = ws;
-    buffer = '';
+      // Format as json?
+      if (store.format === F_JSON && store.buffer.startsWith('{'))
+        store.buffer = JSON.parse(store.buffer);
 
-    try {
-      await command(cmd);
-    } catch (e) {
-      // Failure
-      broadcast({
-        stats: { errors: ++stats.errors }
+      // Create response
+      return JSON.stringify({
+        transaction: transaction,
+        format: store.format,
+        response: store.buffer
       });
-
-      display('error', e.message);
-    }
-
-    // Format as json?
-    if (options.format === F_JSON && buffer.startsWith('{'))
-      buffer = JSON.parse(buffer);
-
-    // Create response
-    const response = JSON.stringify({
-      transaction: transaction,
-      format: options.format,
-      response: buffer
     });
-
-    // Restore pipe
-    pipe = oldpipe;//undefined;
-    buffer = oldbuffer;//undefined;
-
-    if (format)
-      options.format = oldformat;
 
     // Send response
     debug('Websocket response: ' + response);
@@ -2705,8 +3101,8 @@ function update(key, value) {
 
 // Buffer pipe response
 function transmit(text) {
-  if (pipe !== undefined) {
-    buffer += text;
+  if (session().pipe !== undefined) {
+    session().buffer += text;
     return true;
   }
   return false;
@@ -2717,12 +3113,39 @@ function broadcast(changes) {
   if (wss === undefined) return;
 
   try {
-    // Stringify packet
-    const packet = JSON.stringify(changes);
+    // Key changes are scoped per connection, so each client is sent its own
+    // packet. Everything else (stats, version) is realm-wide and shared.
+    const shared = changes.keys === undefined ? JSON.stringify(changes) : undefined;
 
-    // Broadcast to all clients
     wss.clients.forEach((ws) => {
-      ws.send(packet);
+      try {
+        if (shared !== undefined) {
+          ws.send(shared);
+          return;
+        }
+
+        const identity = ws.cnsIdentity || CONSOLE_IDENTITY;
+        const keys = visibleKeys(changes.keys, identity);
+
+        // CRITICAL: never send an empty `keys` object. The client-side merge
+        // treats an empty object as a RESET (`Object.keys(value).length === 0
+        // -> target[key] = {}`), so a change this client may not see would
+        // wipe its entire cache. Send the rest of the packet without a keys
+        // field instead, or nothing at all.
+        if (Object.keys(keys).length === 0) {
+          const rest = { ...changes };
+          delete rest.keys;
+
+          if (Object.keys(rest).length === 0) return;
+          ws.send(JSON.stringify(rest));
+          return;
+        }
+
+        ws.send(JSON.stringify({ ...changes, keys: keys }));
+      } catch (e) {
+        // One bad client must not stop the rest
+        debug(e.message);
+      }
     });
   } catch (e) {
     // Failure
@@ -2904,7 +3327,7 @@ function print(text) {
 
 // Log debug to console
 function debug(text) {
-  if (options.debug)// && pipe === undefined) // && !transmit(text + '\n'))
+  if (options.debug)// && session().pipe === undefined) // && !transmit(text + '\n'))
     console.debug(text.magenta);
 }
 
