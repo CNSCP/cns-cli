@@ -770,23 +770,34 @@ function period(arg) {
 function variable(value) {
   var match;
 
-  // Socket callers send literal values. Variable substitution is a console
-  // convenience ($new, $uuid, $path) whose default branch also reaches
-  // process.env, config and options — and config holds dashboardSecret. A
-  // participant doing `put cns/<own>/x "$dashboardSecret"` would otherwise
-  // write the realm's JWT signing key into its own tree and read it back
-  // (verified). Wire args are never substituted: a value of "$foo" is stored
-  // as "$foo".
-  if (session().pipe !== undefined)
-    return value;
+  // A socket caller may use the generative tokens below ($new, $uuid, …) —
+  // the dashboard's own Add System/Node/Context dialogs send "$new" to have
+  // the host mint an id. What it must NOT reach is the `default` branch, which
+  // resolves an arbitrary $name from process.env, then config, options, stats
+  // and the session's variables. config holds dashboardSecret, so a plain
+  // participant sending
+  //
+  //     put cns/<own>/x "$dashboardSecret"
+  //
+  // would write the realm's JWT signing key into its own tree and read it back
+  // — enough to mint operator tokens (verified). For a wire caller those names
+  // are left as literal text instead.
+  const wire = (session().pipe !== undefined);
+
+  // Scan offset. A name left as literal text (wire caller, unknown name) must
+  // be stepped over, or the next iteration would match it again forever.
+  var from = 0;
 
   // Match variables
-  while (match = value.match(/\$([\d\w_]+)/)) {
+  while (match = value.slice(from).match(/\$([\d\w_]+)/)) {
     // Find variable
+    const at = from + match.index;
+
     const found = match[0];
     const name = match[1];
 
     var data;
+    var literal = false;
 
     switch (name) {
       case 'new':
@@ -822,7 +833,14 @@ function variable(value) {
         data = reply || '';
         break;
       default:
-        // Other vars
+        // Other vars. Never resolved for a wire caller — this is the branch
+        // that would otherwise hand out process.env and config (including
+        // dashboardSecret). Left as literal text instead.
+        if (wire) {
+          literal = true;
+          break;
+        }
+
         data = process.env[name];
 
         if (data === undefined) data = config[name];
@@ -832,12 +850,18 @@ function variable(value) {
         break;
     }
 
+    // Left as written: step over it and carry on.
+    if (literal) {
+      from = at + found.length;
+      continue;
+    }
+
     // Not found?
     if (data === undefined)
       throw new Error(E_VARIABLE + ': ' + name);
 
     // Replace with value
-    value = value.replace(found, data);
+    value = value.slice(0, at) + data + value.slice(at + found.length);
   }
   return value;
 }
