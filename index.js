@@ -770,6 +770,16 @@ function period(arg) {
 function variable(value) {
   var match;
 
+  // Socket callers send literal values. Variable substitution is a console
+  // convenience ($new, $uuid, $path) whose default branch also reaches
+  // process.env, config and options — and config holds dashboardSecret. A
+  // participant doing `put cns/<own>/x "$dashboardSecret"` would otherwise
+  // write the realm's JWT signing key into its own tree and read it back
+  // (verified). Wire args are never substituted: a value of "$foo" is stored
+  // as "$foo".
+  if (session().pipe !== undefined)
+    return value;
+
   // Match variables
   while (match = value.match(/\$([\d\w_]+)/)) {
     // Find variable
@@ -2899,6 +2909,29 @@ function start(host, port) {
   app.use(compression());
   app.use(express.urlencoded({ extended: false }));
 
+  // Security headers. Defence in depth behind the output-escaping in
+  // public/main.js: a Content-Security-Policy of 'self' means that even if a
+  // key or value slipped through unescaped, an injected <script> or inline
+  // handler cannot execute. The dashboard loads only its own same-origin
+  // scripts/styles and talks to its own websocket, so 'self' is sufficient and
+  // nothing inline is needed. The rest are standard hardening headers.
+  app.use((req, res, next) => {
+    res.setHeader('Content-Security-Policy',
+      "default-src 'self'; " +
+      "script-src 'self'; " +
+      "style-src 'self'; " +
+      "img-src 'self' data:; " +
+      "connect-src 'self' ws: wss:; " +
+      "font-src 'self'; " +
+      "base-uri 'none'; " +
+      "form-action 'self'; " +
+      "frame-ancestors 'none'");
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    next();
+  });
+
   // Login page - always reachable, never behind auth
   app.get('/login', (req, res) => {
     if (config.dashboardSecret === '') {
@@ -2907,6 +2940,15 @@ function start(host, port) {
     }
     res.sendFile(path.join(__dirname, '/public/login.html'));
   });
+
+  // The login page's own stylesheet and script must load before the visitor
+  // is authenticated, so they sit ahead of the authorize middleware (the rest
+  // of public/ stays behind it). Externalised from inline <style>/<script> so
+  // the strict Content-Security-Policy needs no 'unsafe-inline'.
+  app.get('/login.css', (req, res) =>
+    res.sendFile(path.join(__dirname, '/public/login.css')));
+  app.get('/login.js', (req, res) =>
+    res.sendFile(path.join(__dirname, '/public/login.js')));
 
   app.post('/login', (req, res) => {
     if (config.dashboardSecret === '') {
@@ -3018,7 +3060,9 @@ function start(host, port) {
         res.status(404).send('<h1>Page not found</h1>');
       });
 
-      print('CNS Dashboard running on http://' + host + ':' + port);
+      // server.listen(port) binds all interfaces, not just `host`. Say so,
+      // rather than printing a localhost URL the service isn't limited to.
+      print('CNS Dashboard listening on port ' + port + ' (all interfaces)');
     })
     // Failure
     .on('error', (e) => {

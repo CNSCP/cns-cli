@@ -90,6 +90,21 @@ async function main() {
   r = await rpc(ws, `get cns/${SYS}/nodes/n1/name`);
   allowed('self-retract actually removed the key', !JSON.stringify(r.response ?? '').includes('Node 1'), JSON.stringify(r).slice(0, 160));
 
+  // ---- variable substitution must NOT run on socket args ----
+  // A wire caller sends literal values. If variable() ran, "$HOME" would be
+  // replaced from process.env (and "$dashboardSecret" from config — the JWT
+  // signing key), writing a server secret into the caller's own tree.
+  await rpc(ws, `put cns/${SYS}/nodes/n1/leak "$HOME"`);
+  r = await rpc(ws, `get cns/${SYS}/nodes/n1/leak`);
+  {
+    const body = JSON.stringify(r.response ?? '');
+    const literal = body.includes('$HOME');
+    const expanded = /"\/(?:home|root|Users|sessions)/.test(body);
+    report(literal && !expanded, 'NO-SUBST  $HOME stored literally (secret-leak guard)',
+      `got: ${body.slice(0, 160)}`);
+  }
+  await rpc(ws, `purge cns/${SYS}`);
+
   ws.close();
   console.log(`\n=== socket-security: ${pass}/${pass + fail} passed ===`);
   process.exit(fail ? 1 : 0);
