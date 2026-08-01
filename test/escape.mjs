@@ -49,5 +49,50 @@ check('escapes ampersand', escapeHtml('a & b').includes('&amp;'));
 check('null coerces to empty', escapeHtml(null) === '');
 check('number coerces', escapeHtml(42) === '42');
 
+// ---- the call sites, not just the helper ----
+//
+// Testing escapeHtml in isolation proves the tool exists, not that it is used:
+// every call site in main.js could be reverted to raw concatenation and the
+// assertions above would still pass. So also check the source text. Any of
+// these names concatenated straight into markup is attacker-controlled data
+// from etcd and must be wrapped (or be one of the pre-escaped *H locals).
+const TAINTED = [
+  'value', 'name', 'id', 'key', 'scope', 'version', 'token', 'orchestrator',
+  'upstream', 'consumer', 'property', 'display', 'from', 'cs', 'ps', 'ns',
+  'otherKey', 'otherNode', 'otherContext', 'icon', 'text', 'role', 'profile'
+];
+
+// A bare tainted identifier inside a string concatenation: "' + value +" or
+// "' + value  +  '". The escaped forms are escapeHtml(x) or the *H locals, so
+// neither matches this.
+const bare = new RegExp("\\+\\s*(" + TAINTED.join('|') + ")\\s*\\+", 'g');
+
+const offenders = [];
+src.split('\n').forEach((line, i) => {
+  // Only interested in lines that build markup.
+  if (!/['"]\s*<|<\w|=\\?"/.test(line)) return;
+
+  // Not markup: building a key path ('cns/' + system + '/nodes/…') or a CSS
+  // selector to hand to query()/focus()/$$(). Selector values are escaped by
+  // keySelector() where they can contain etcd data.
+  if (/^\s*(const|var|let)\s+\w+\s*=\s*'cns\//.test(line)) return;
+  if (/(focus|query|radio|\$\$)\s*\(/.test(line)) return;
+
+  let m;
+  bare.lastIndex = 0;
+  while ((m = bare.exec(line)) !== null)
+    offenders.push(`main.js:${i + 1}  ${m[1]}  ->  ${line.trim().slice(0, 90)}`);
+});
+
+check('no tainted value is concatenated into markup unescaped',
+  offenders.length === 0);
+if (offenders.length) offenders.forEach((o) => console.log('        ' + o));
+
+// And the sanity check that the above rule can actually fire, so a future
+// refactor that renames things does not silently make this test vacuous.
+const sample = "'<td>' + value + '</td>'";
+check('the call-site rule detects an unescaped interpolation',
+  new RegExp("\\+\\s*(" + TAINTED.join('|') + ")\\s*\\+").test(sample));
+
 console.log(`\n=== escape: ${pass}/${pass + fail} passed ===`);
 process.exit(fail ? 1 : 0);

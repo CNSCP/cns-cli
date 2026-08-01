@@ -22,6 +22,11 @@ const M_RECONNECT = 'Reconnecting to network';
 const MAX_MESSAGES = 32;
 
 // Palette
+//
+// The colours themselves now live in main.css as the dd.pal0-pal7 rules (a
+// Content-Security-Policy of style-src 'self' refuses inline style
+// attributes); this list is kept as the source of truth for how many there
+// are, and to document which class is which. Keep the two in step.
 
 const PALETTE = [
   '#66c5cc',
@@ -410,11 +415,16 @@ async function update(data) {
 
     const started = stats.started?toDateTime(new Date(stats.started)):'-';
 
+    // Server-supplied rather than participant-supplied, so not the XSS vector
+    // the list builders are — but escaped anyway, so that the rule "everything
+    // interpolated into markup is escaped" holds without exceptions.
     const version = sanitize(client.version);
-    const reads = sanitize(stats.reads);
-    const writes = sanitize(stats.writes);
-    const updates = sanitize(stats.updates);
-    const errors = sanitize(stats.errors);
+
+    const versionH = escapeHtml(version);
+    const readsH = escapeHtml(sanitize(stats.reads));
+    const writesH = escapeHtml(sanitize(stats.writes));
+    const updatesH = escapeHtml(sanitize(stats.updates));
+    const errorsH = escapeHtml(sanitize(stats.errors));
 
     const connection = isOnline?('<span>Online</span>'):'<span error>Offline</span>';
 
@@ -433,17 +443,18 @@ async function update(data) {
         '<tr>' +
           '<td><i>info</i></td>' +
           '<td>' + started + '</td>' +
-          '<td align="center">' + version + '</td>' +
-          '<td align="center">' + reads + '</td>' +
-          '<td align="center">' + writes + '</td>' +
-          '<td align="center">' + updates + '</td>' +
-          '<td align="center">' + errors + '</td>' +
+          '<td align="center">' + versionH + '</td>' +
+          '<td align="center">' + readsH + '</td>' +
+          '<td align="center">' + writesH + '</td>' +
+          '<td align="center">' + updatesH + '</td>' +
+          '<td align="center">' + errorsH + '</td>' +
           '<td></td>' +
         '</tr>' +
       '</table>';
 
     html('#overview-status', list);
 
+    // textContent, not innerHTML — takes the raw value, not the escaped one.
     text('#version', version);
     html('footer', connection);
   }
@@ -473,7 +484,7 @@ async function update(data) {
           rebuild = true;
 
         // Element exists?
-        const elements = $$('[data-key="' + key + '"]');
+        const elements = $$(keySelector(key));
 
         if (elements.length === 0)
           rebuild = true;
@@ -510,7 +521,7 @@ async function update(data) {
     const element = focus();
 
     const key = element?attribute(element, 'data-key'):null;
-    const focused = key?('[data-key="' + key + '"]'):undefined;
+    const focused = key?keySelector(key):undefined;
 
     // Update lists
     html('#watchers-list', list1);
@@ -561,7 +572,10 @@ function listWatchers() {
       parts.push('properties');
       parts.push(property);
 
-      const style = ' style="border-color: ' + PALETTE[total % PALETTE.length] + ';"';
+      // Colour comes from a class, not an inline style attribute: the
+      // dashboard's Content-Security-Policy (style-src 'self') refuses inline
+      // style attributes. See the pal0-pal7 rules in main.css.
+      const style = ' class="pal' + (total % PALETTE.length) + '"';
 
       const key = parts.join('/');
       const ps = conns[conn];
@@ -1344,9 +1358,11 @@ async function execute(cmd) {
   if (format === 'json')
       text = JSON.stringify(text, null, 2);
 
-  text = escapeHtml(text);
+  // Named for what it is, so it is obvious at the sink below (and to the
+  // call-site check in test/escape.mjs) that this went through the escaper.
+  const safe = escapeHtml(text);
 
-  if (text !== '') html('#command-response', '<pre>' + text + '</pre>');
+  if (safe !== '') html('#command-response', '<pre>' + safe + '</pre>');
 }
 
 // Reconnect to network
@@ -1381,6 +1397,20 @@ function sanitize(value) {
 // Pluralize numeric value
 function pluralize(value, singular, plural) {
   return value + ' ' + ((value === 1)?singular:plural);
+}
+
+// Build a [data-key="…"] selector for a CNS key
+//
+// Keys come from etcd and may contain characters that are syntax inside a CSS
+// attribute selector — a double quote or a backslash makes querySelector throw
+// SyntaxError. That throw happens inside the async update() handler, so it
+// surfaces as an unhandled rejection: no error dialog, and the list rebuild
+// below it never runs, leaving the dashboard silently frozen until reload.
+// Inside a double-quoted attribute value only " and \ are special, so escaping
+// those two is sufficient and leaves the selector readable (CSS.escape would
+// also escape every / in a CNS key).
+function keySelector(key) {
+  return '[data-key="' + String(key).replace(/["\\]/g, '\\$&') + '"]';
 }
 
 // Escape html characters

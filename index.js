@@ -215,6 +215,13 @@ const socketCommands = new Set([
 // The ONLY commands an enrolment credential may invoke.
 const enrolCommands = new Set(['enrol', 'enroll', 'help', 'version']);
 
+// The ONLY $variables a socket caller may have substituted (see variable()).
+// Pure generators and clock reads: they derive from nothing but themselves, so
+// they cannot disclose server configuration or another caller's state. Every
+// other name — including $path and $ask, and anything reaching process.env or
+// config — is left as literal text for a wire caller.
+const wireVariables = new Set(['new', 'uuid', 'rand', 'now', 'date', 'time']);
+
 // Socket-reachable commands whose first argument is a key that must be
 // absolute — relative keys resolve through the shared `namespace` (cd), which
 // is global across all sockets, so a relative key from one client can be
@@ -770,18 +777,25 @@ function period(arg) {
 function variable(value) {
   var match;
 
-  // A socket caller may use the generative tokens below ($new, $uuid, …) —
-  // the dashboard's own Add System/Node/Context dialogs send "$new" to have
-  // the host mint an id. What it must NOT reach is the `default` branch, which
-  // resolves an arbitrary $name from process.env, then config, options, stats
-  // and the session's variables. config holds dashboardSecret, so a plain
-  // participant sending
+  // Substitution is a console convenience. A socket caller gets ONLY the pure
+  // generators in wireVariables — the dashboard's own Add System/Node/Context
+  // dialogs send "$new" to have the host mint an id, so those must keep
+  // working. Everything else is left as literal text for a wire caller,
+  // because every other source is server-side state:
   //
-  //     put cns/<own>/x "$dashboardSecret"
+  //   default  process.env, config, options, stats, session variables. config
+  //            holds dashboardSecret, so `put cns/<own>/x "$dashboardSecret"`
+  //            would write the realm's JWT signing key into a participant's
+  //            own tree and read it back — enough to mint operator tokens.
+  //   $ask     the console operator's last `ask` reply — scripts use `ask` for
+  //            passwords, so this is another caller's secret.
+  //   $path    the session's namespace, i.e. other-caller state.
   //
-  // would write the realm's JWT signing key into its own tree and read it back
-  // — enough to mint operator tokens (verified). For a wire caller those names
-  // are left as literal text instead.
+  // Left literal rather than rejected on purpose: a value is data. "costs $5"
+  // and JSON containing "$ref" are ordinary values that a participant must be
+  // able to store, and rejecting them would fail the write outright (which is
+  // what the old code did). Substitution being console-only is documented in
+  // README.md.
   const wire = (session().pipe !== undefined);
 
   // Scan offset. A name left as literal text (wire caller, unknown name) must
@@ -797,7 +811,14 @@ function variable(value) {
     const name = match[1];
 
     var data;
-    var literal = false;
+
+    // Wire caller asking for anything outside the generator set? Leave it be.
+    var literal = (wire && !wireVariables.has(name));
+
+    if (literal) {
+      from = at + found.length;
+      continue;
+    }
 
     switch (name) {
       case 'new':
@@ -833,14 +854,7 @@ function variable(value) {
         data = reply || '';
         break;
       default:
-        // Other vars. Never resolved for a wire caller — this is the branch
-        // that would otherwise hand out process.env and config (including
-        // dashboardSecret). Left as literal text instead.
-        if (wire) {
-          literal = true;
-          break;
-        }
-
+        // Other vars. Unreachable for a wire caller — filtered above.
         data = process.env[name];
 
         if (data === undefined) data = config[name];
@@ -850,18 +864,21 @@ function variable(value) {
         break;
     }
 
-    // Left as written: step over it and carry on.
-    if (literal) {
-      from = at + found.length;
-      continue;
-    }
-
     // Not found?
     if (data === undefined)
       throw new Error(E_VARIABLE + ': ' + name);
 
     // Replace with value
-    value = value.slice(0, at) + data + value.slice(at + found.length);
+    const insert = String(data);
+    value = value.slice(0, at) + insert + value.slice(at + found.length);
+
+    // Carry on after what was just inserted. Rescanning the whole string after
+    // every hit made this quadratic — a value of N repeated tokens cost N
+    // rescans plus N string rebuilds, which a wire caller could turn into
+    // seconds of blocked event loop. Only back up when the inserted text could
+    // itself contain a variable, which preserves nested expansion for the
+    // console (generators never emit '$').
+    from = insert.includes('$') ? 0 : at + insert.length;
   }
   return value;
 }

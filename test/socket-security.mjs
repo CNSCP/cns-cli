@@ -104,14 +104,11 @@ async function main() {
       `got: ${body.slice(0, 160)}`);
   }
 
-  // The signing key itself, by its config name.
-  await rpc(ws, `put cns/${SYS}/nodes/n1/leak2 "$dashboardSecret"`);
-  r = await rpc(ws, `get cns/${SYS}/nodes/n1/leak2`);
-  {
-    const body = JSON.stringify(r.response ?? '');
-    report(body.includes('$dashboardSecret'),
-      'NO-SUBST  $dashboardSecret not resolved (JWT signing key)', `got: ${body.slice(0, 160)}`);
-  }
+  // NB: the $dashboardSecret case lives in socket-rights.mjs, not here. This
+  // suite runs against a realm with NO secret set, so asserting that the
+  // signing key does not leak would pass against an empty string and prove
+  // nothing. socket-rights.mjs runs with a real secret and a scoped
+  // participant token, which is where that assertion means something.
   await rpc(ws, `purge cns/${SYS}`);
 
   // ---- but the generative tokens MUST still work over the socket ----
