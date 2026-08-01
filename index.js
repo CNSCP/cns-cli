@@ -215,6 +215,13 @@ const socketCommands = new Set([
 // The ONLY commands an enrolment credential may invoke.
 const enrolCommands = new Set(['enrol', 'enroll', 'help', 'version']);
 
+// The ONLY $variables a socket caller may have substituted (see variable()).
+// Pure generators and clock reads: they derive from nothing but themselves, so
+// they cannot disclose server configuration or another caller's state. Every
+// other name — including $path and $ask, and anything reaching process.env or
+// config — is left as literal text for a wire caller.
+const wireVariables = new Set(['new', 'uuid', 'rand', 'now', 'date', 'time']);
+
 // Socket-reachable commands whose first argument is a key that must be
 // absolute — relative keys resolve through the shared `namespace` (cd), which
 // is global across all sockets, so a relative key from one client can be
@@ -770,13 +777,48 @@ function period(arg) {
 function variable(value) {
   var match;
 
+  // Substitution is a console convenience. A socket caller gets ONLY the pure
+  // generators in wireVariables — the dashboard's own Add System/Node/Context
+  // dialogs send "$new" to have the host mint an id, so those must keep
+  // working. Everything else is left as literal text for a wire caller,
+  // because every other source is server-side state:
+  //
+  //   default  process.env, config, options, stats, session variables. config
+  //            holds dashboardSecret, so `put cns/<own>/x "$dashboardSecret"`
+  //            would write the realm's JWT signing key into a participant's
+  //            own tree and read it back — enough to mint operator tokens.
+  //   $ask     the console operator's last `ask` reply — scripts use `ask` for
+  //            passwords, so this is another caller's secret.
+  //   $path    the session's namespace, i.e. other-caller state.
+  //
+  // Left literal rather than rejected on purpose: a value is data. "costs $5"
+  // and JSON containing "$ref" are ordinary values that a participant must be
+  // able to store, and rejecting them would fail the write outright (which is
+  // what the old code did). Substitution being console-only is documented in
+  // README.md.
+  const wire = (session().pipe !== undefined);
+
+  // Scan offset. A name left as literal text (wire caller, unknown name) must
+  // be stepped over, or the next iteration would match it again forever.
+  var from = 0;
+
   // Match variables
-  while (match = value.match(/\$([\d\w_]+)/)) {
+  while (match = value.slice(from).match(/\$([\d\w_]+)/)) {
     // Find variable
+    const at = from + match.index;
+
     const found = match[0];
     const name = match[1];
 
     var data;
+
+    // Wire caller asking for anything outside the generator set? Leave it be.
+    var literal = (wire && !wireVariables.has(name));
+
+    if (literal) {
+      from = at + found.length;
+      continue;
+    }
 
     switch (name) {
       case 'new':
@@ -812,7 +854,7 @@ function variable(value) {
         data = reply || '';
         break;
       default:
-        // Other vars
+        // Other vars. Unreachable for a wire caller — filtered above.
         data = process.env[name];
 
         if (data === undefined) data = config[name];
@@ -827,7 +869,16 @@ function variable(value) {
       throw new Error(E_VARIABLE + ': ' + name);
 
     // Replace with value
-    value = value.replace(found, data);
+    const insert = String(data);
+    value = value.slice(0, at) + insert + value.slice(at + found.length);
+
+    // Carry on after what was just inserted. Rescanning the whole string after
+    // every hit made this quadratic — a value of N repeated tokens cost N
+    // rescans plus N string rebuilds, which a wire caller could turn into
+    // seconds of blocked event loop. Only back up when the inserted text could
+    // itself contain a variable, which preserves nested expansion for the
+    // console (generators never emit '$').
+    from = insert.includes('$') ? 0 : at + insert.length;
   }
   return value;
 }
@@ -2899,6 +2950,29 @@ function start(host, port) {
   app.use(compression());
   app.use(express.urlencoded({ extended: false }));
 
+  // Security headers. Defence in depth behind the output-escaping in
+  // public/main.js: a Content-Security-Policy of 'self' means that even if a
+  // key or value slipped through unescaped, an injected <script> or inline
+  // handler cannot execute. The dashboard loads only its own same-origin
+  // scripts/styles and talks to its own websocket, so 'self' is sufficient and
+  // nothing inline is needed. The rest are standard hardening headers.
+  app.use((req, res, next) => {
+    res.setHeader('Content-Security-Policy',
+      "default-src 'self'; " +
+      "script-src 'self'; " +
+      "style-src 'self'; " +
+      "img-src 'self' data:; " +
+      "connect-src 'self' ws: wss:; " +
+      "font-src 'self'; " +
+      "base-uri 'none'; " +
+      "form-action 'self'; " +
+      "frame-ancestors 'none'");
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    next();
+  });
+
   // Login page - always reachable, never behind auth
   app.get('/login', (req, res) => {
     if (config.dashboardSecret === '') {
@@ -2907,6 +2981,15 @@ function start(host, port) {
     }
     res.sendFile(path.join(__dirname, '/public/login.html'));
   });
+
+  // The login page's own stylesheet and script must load before the visitor
+  // is authenticated, so they sit ahead of the authorize middleware (the rest
+  // of public/ stays behind it). Externalised from inline <style>/<script> so
+  // the strict Content-Security-Policy needs no 'unsafe-inline'.
+  app.get('/login.css', (req, res) =>
+    res.sendFile(path.join(__dirname, '/public/login.css')));
+  app.get('/login.js', (req, res) =>
+    res.sendFile(path.join(__dirname, '/public/login.js')));
 
   app.post('/login', (req, res) => {
     if (config.dashboardSecret === '') {
@@ -3018,7 +3101,9 @@ function start(host, port) {
         res.status(404).send('<h1>Page not found</h1>');
       });
 
-      print('CNS Dashboard running on http://' + host + ':' + port);
+      // server.listen(port) binds all interfaces, not just `host`. Say so,
+      // rather than printing a localhost URL the service isn't limited to.
+      print('CNS Dashboard listening on port ' + port + ' (all interfaces)');
     })
     // Failure
     .on('error', (e) => {

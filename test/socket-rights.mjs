@@ -84,6 +84,41 @@ async function main() {
   check(ok(await a(`nodes ${ALICE} n2 "mine" no`)), 'participant: structural cmd for OWN system allowed');
   check(denied(await a('curl http://example.com')), 'participant: console verb denied');
 
+  // ---------- variable substitution over the socket ----------
+  // These belong here rather than in socket-security.mjs because they are only
+  // meaningful against a realm that HAS a secret and a genuinely scoped token:
+  // asserting that "$dashboardSecret" does not leak proves nothing when the
+  // secret is the empty string and the caller is legacy/unrestricted.
+  //
+  // The signing key is the whole ballgame — a participant that reads it can
+  // mint itself an operator token — and $ask/$path are another caller's state.
+  const stored = async (key, value) => {
+    await a(`put cns/${ALICE}/nodes/n/${key} "${value}"`);
+    const r = await a(`get cns/${ALICE}/nodes/n/${key}`);
+    const body = JSON.stringify(r.response ?? '');
+    const m = body.match(/:\s*"((?:[^"\\]|\\.)*)"\s*\}/);
+    return m ? m[1] : body;
+  };
+
+  const secret = await stored('v1', '$dashboardSecret');
+  check(secret === '$dashboardSecret',
+    'participant: $dashboardSecret NOT resolved (JWT signing key)', `stored ${secret}`);
+
+  const home = await stored('v2', '$HOME');
+  check(home === '$HOME', 'participant: $HOME NOT resolved (process env)', `stored ${home}`);
+
+  const ask = await stored('v3', '$ask');
+  check(ask === '$ask', 'participant: $ask NOT resolved (console operator reply)', `stored ${ask}`);
+
+  const path = await stored('v4', '$path');
+  check(path === '$path', 'participant: $path NOT resolved (other-caller namespace)', `stored ${path}`);
+
+  // …but the pure generators must still work: the dashboard's Add dialogs send
+  // "$new" and rely on the host minting an id.
+  const minted = await stored('v5', '$new');
+  check(minted !== '$new' && /^[1-9A-HJ-NP-Za-km-z]{10,}$/.test(minted),
+    'participant: $new still generates an id', `stored ${minted}`);
+
   // Snapshot visibility
   const aKeys = Object.keys(alice.snapshot.keys || {});
   check(aKeys.length > 0 && aKeys.every((k) => k.startsWith(`cns/${ALICE}/`)),
@@ -109,6 +144,18 @@ async function main() {
   const leg = await open(mint(undefined, 'participant'));
   const l = rpcFactory(leg.ws);
   check(ok(await l(`get cns/${BOB}/nodes/n/name`)), 'legacy (no sys claim): unrestricted read — back-compat');
+
+  // ---------- sweep ----------
+  // Leave the realm as we found it. A test that seeds systems and walks away
+  // leaves orphans that nothing can retract later, which is how the shared
+  // realm accumulated junk before. Purge from the operator socket (a
+  // participant may only purge its own tree) and verify it took.
+  await admin(`purge cns/${ALICE}`);
+  await admin(`purge cns/${BOB}`);
+
+  const swept = await admin(`get cns/${ALICE}/nodes/n/name`);
+  check(!JSON.stringify(swept.response ?? '').includes('ALICE-DATA'),
+    'sweep: test systems purged', JSON.stringify(swept).slice(0, 120));
 
   for (const c of [legacy.ws, alice.ws, obs.ws, op.ws, leg.ws]) c.close();
   console.log(`\n=== socket-rights: ${pass}/${pass + fail} passed ===`);

@@ -90,6 +90,44 @@ async function main() {
   r = await rpc(ws, `get cns/${SYS}/nodes/n1/name`);
   allowed('self-retract actually removed the key', !JSON.stringify(r.response ?? '').includes('Node 1'), JSON.stringify(r).slice(0, 160));
 
+  // ---- env/config variables must NOT resolve for a socket caller ----
+  // If the `default` branch of variable() ran, "$HOME" would resolve from
+  // process.env and "$dashboardSecret" from config (the JWT signing key),
+  // writing a server secret into the caller's own tree and back out again.
+  await rpc(ws, `put cns/${SYS}/nodes/n1/leak "$HOME"`);
+  r = await rpc(ws, `get cns/${SYS}/nodes/n1/leak`);
+  {
+    const body = JSON.stringify(r.response ?? '');
+    const literal = body.includes('$HOME');
+    const expanded = /"\/(?:home|root|Users|sessions)/.test(body);
+    report(literal && !expanded, 'NO-SUBST  $HOME stored literally (secret-leak guard)',
+      `got: ${body.slice(0, 160)}`);
+  }
+
+  // NB: the $dashboardSecret case lives in socket-rights.mjs, not here. This
+  // suite runs against a realm with NO secret set, so asserting that the
+  // signing key does not leak would pass against an empty string and prove
+  // nothing. socket-rights.mjs runs with a real secret and a scoped
+  // participant token, which is where that assertion means something.
+  await rpc(ws, `purge cns/${SYS}`);
+
+  // ---- but the generative tokens MUST still work over the socket ----
+  // The dashboard's Add System/Node/Context dialogs send "$new" for a blank id
+  // and rely on the host to mint one. Narrowing the guard to the `default`
+  // branch must not have broken that. Assert on a key we can read back, so the
+  // test cleans up after itself (`systems` returns an empty response).
+  await rpc(ws, `put cns/${SYS}/nodes/n1/generated "$new"`);
+  r = await rpc(ws, `get cns/${SYS}/nodes/n1/generated`);
+  {
+    const body = JSON.stringify(r.response ?? '');
+    const stillLiteral = body.includes('$new');
+    // short-uuid ids are ~22 chars of base58
+    const minted = /"[1-9A-HJ-NP-Za-km-z]{10,}"\s*\}/.test(body);
+    report(!stillLiteral && minted, 'SUBST  $new still generates an id over the socket',
+      `got: ${body.slice(0, 200)}`);
+  }
+  await rpc(ws, `purge cns/${SYS}`);
+
   ws.close();
   console.log(`\n=== socket-security: ${pass}/${pass + fail} passed ===`);
   process.exit(fail ? 1 : 0);

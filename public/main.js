@@ -22,6 +22,11 @@ const M_RECONNECT = 'Reconnecting to network';
 const MAX_MESSAGES = 32;
 
 // Palette
+//
+// The colours themselves now live in main.css as the dd.pal0-pal7 rules (a
+// Content-Security-Policy of style-src 'self' refuses inline style
+// attributes); this list is kept as the source of truth for how many there
+// are, and to document which class is which. Keep the two in step.
 
 const PALETTE = [
   '#66c5cc',
@@ -410,11 +415,16 @@ async function update(data) {
 
     const started = stats.started?toDateTime(new Date(stats.started)):'-';
 
+    // Server-supplied rather than participant-supplied, so not the XSS vector
+    // the list builders are — but escaped anyway, so that the rule "everything
+    // interpolated into markup is escaped" holds without exceptions.
     const version = sanitize(client.version);
-    const reads = sanitize(stats.reads);
-    const writes = sanitize(stats.writes);
-    const updates = sanitize(stats.updates);
-    const errors = sanitize(stats.errors);
+
+    const versionH = escapeHtml(version);
+    const readsH = escapeHtml(sanitize(stats.reads));
+    const writesH = escapeHtml(sanitize(stats.writes));
+    const updatesH = escapeHtml(sanitize(stats.updates));
+    const errorsH = escapeHtml(sanitize(stats.errors));
 
     const connection = isOnline?('<span>Online</span>'):'<span error>Offline</span>';
 
@@ -433,17 +443,18 @@ async function update(data) {
         '<tr>' +
           '<td><i>info</i></td>' +
           '<td>' + started + '</td>' +
-          '<td align="center">' + version + '</td>' +
-          '<td align="center">' + reads + '</td>' +
-          '<td align="center">' + writes + '</td>' +
-          '<td align="center">' + updates + '</td>' +
-          '<td align="center">' + errors + '</td>' +
+          '<td align="center">' + versionH + '</td>' +
+          '<td align="center">' + readsH + '</td>' +
+          '<td align="center">' + writesH + '</td>' +
+          '<td align="center">' + updatesH + '</td>' +
+          '<td align="center">' + errorsH + '</td>' +
           '<td></td>' +
         '</tr>' +
       '</table>';
 
     html('#overview-status', list);
 
+    // textContent, not innerHTML — takes the raw value, not the escaped one.
     text('#version', version);
     html('footer', connection);
   }
@@ -473,7 +484,7 @@ async function update(data) {
           rebuild = true;
 
         // Element exists?
-        const elements = $$('[data-key="' + key + '"]');
+        const elements = $$(keySelector(key));
 
         if (elements.length === 0)
           rebuild = true;
@@ -510,7 +521,7 @@ async function update(data) {
     const element = focus();
 
     const key = element?attribute(element, 'data-key'):null;
-    const focused = key?('[data-key="' + key + '"]'):undefined;
+    const focused = key?keySelector(key):undefined;
 
     // Update lists
     html('#watchers-list', list1);
@@ -561,7 +572,10 @@ function listWatchers() {
       parts.push('properties');
       parts.push(property);
 
-      const style = ' style="border-color: ' + PALETTE[total % PALETTE.length] + ';"';
+      // Colour comes from a class, not an inline style attribute: the
+      // dashboard's Content-Security-Policy (style-src 'self') refuses inline
+      // style attributes. See the pal0-pal7 rules in main.css.
+      const style = ' class="pal' + (total % PALETTE.length) + '"';
 
       const key = parts.join('/');
       const ps = conns[conn];
@@ -569,12 +583,12 @@ function listWatchers() {
       const value = client.get(key, '');
 
       list +=
-        '<dd id="watchers-add" data-type="' + display + '" data-key="' + from + '" data-val="on"' + style + '>' +
-          '<button id="watchers-remove" data-key="' + cs + '" data-val="off" icon primary><i>clear</i></button>' +
-          '<h1 data-key="' + ns + '/name">' + consumer + '</h1>' +
-          '<p data-key="' + key + '">' + value + '</p>' +
-          '<h2 data-key="' + ps + '/name">' + property + '</h2>' +
-          '<h2>' + profile + '</h2>' +
+        '<dd id="watchers-add" data-type="' + escapeHtml(display) + '" data-key="' + escapeHtml(from) + '" data-val="on"' + style + '>' +
+          '<button id="watchers-remove" data-key="' + escapeHtml(cs) + '" data-val="off" icon primary><i>clear</i></button>' +
+          '<h1 data-key="' + escapeHtml(ns) + '/name">' + escapeHtml(consumer) + '</h1>' +
+          '<p data-key="' + escapeHtml(key) + '">' + escapeHtml(value) + '</p>' +
+          '<h2 data-key="' + escapeHtml(ps) + '/name">' + escapeHtml(property) + '</h2>' +
+          '<h2>' + escapeHtml(profile) + '</h2>' +
         '</dd>';
     }
     total++;
@@ -611,9 +625,9 @@ function listMessages() {
 
     list +=
       '<tr>' +
-        '<td><i ' + icon + '>' + icon + '</i></td>' +
+        '<td><i ' + escapeHtml(icon) + '>' + escapeHtml(icon) + '</i></td>' +
         '<td>' + toDateTime(time) + '</td>' +
-        '<td>' + text + '</td>' +
+        '<td>' + escapeHtml(text) + '</td>' +
         '<td></td>' +
       '</tr>';
 
@@ -661,8 +675,12 @@ function listSystems() {
     if (match(id, wildcard) || match(name, wildcard)) {
       const key = ns + id;
 
-      const expand = '<button id="systems-expand" data-key="' + key + '" icon primary><i>' + isExpanded(key) + '</i></button>';
-      const action = '<button id="systems-remove" data-key="' + key + '" data-val="' + id + '" data-tip="Remove System" data-pos="left" icon primary><i>delete</i></button>';
+      const keyH = escapeHtml(key);
+      const idH = escapeHtml(id);
+      const nameH = escapeHtml(name);
+
+      const expand = '<button id="systems-expand" data-key="' + keyH + '" icon primary><i>' + isExpanded(key) + '</i></button>';
+      const action = '<button id="systems-remove" data-key="' + keyH + '" data-val="' + idH + '" data-tip="Remove System" data-pos="left" icon primary><i>delete</i></button>';
 
       const orchestrator = client.get(key + '/orchestrator', 'none');
       const token = client.get(key + '/token', '');
@@ -670,9 +688,9 @@ function listSystems() {
       list +=
         '<tr>' +
           '<td>' + expand + '</td>' +
-          '<td>' + id + '</td>' +
-          '<td data-key="' + key + '/name">' + name + '</td>' +
-          '<td data-key="' + key + '/orchestrator" align="center">' + orchestrator + '</td>' +
+          '<td>' + idH + '</td>' +
+          '<td data-key="' + keyH + '/name">' + nameH + '</td>' +
+          '<td data-key="' + keyH + '/orchestrator" align="center">' + escapeHtml(orchestrator) + '</td>' +
           '<td>' + action + '</td>' +
         '</tr>' +
         '<tr expand' + isHidden(key) + '>' +
@@ -680,15 +698,15 @@ function listSystems() {
           '<td colspan="4">' +
             '<form id="system-form">' +
               '<label>System name</label>' +
-              '<input id="system-name" type="text" value="' + name + '" maxlength="128" data-key="' + key + '/name" placeholder="New System"/>' +
+              '<input id="system-name" type="text" value="' + nameH + '" maxlength="128" data-key="' + keyH + '/name" placeholder="New System"/>' +
               '<label>System orchestrator</label>' +
-              '<select id="system-orchestrator" data-key="' + key + '/orchestrator">' +
+              '<select id="system-orchestrator" data-key="' + keyH + '/orchestrator">' +
                 '<option value="none"' + isSelected(orchestrator, 'none') + '>None</option>' +
                 '<option value="allsystems"' + isSelected(orchestrator, 'allsystems') + '>All Systems</option>' +
                 '<option value="bysystem"' + isSelected(orchestrator, 'bysystem') + '>By System</option>' +
               '</select>' +
               '<label>System token</label>' +
-              '<input id="system-token" type="text" value="' + token + '" maxlength="128" data-key="' + key + '/token" readonly/>' +
+              '<input id="system-token" type="text" value="' + escapeHtml(token) + '" maxlength="128" data-key="' + keyH + '/token" readonly/>' +
             '</form>' +
             listNodes(id) +
           '</td>' +
@@ -732,8 +750,12 @@ function listNodes(system) {
 
     const key = ns + id;
 
-    const expand = '<button id="nodes-expand" data-key="' + key + '" icon primary><i>' + isExpanded(key) + '</i></button>';
-    const action = '<button id="nodes-remove" data-key="' + key + '" data-val="' + id + '" data-tip="Remove Node" data-pos="left" icon primary><i>delete</i></button>';
+    const keyH = escapeHtml(key);
+    const idH = escapeHtml(id);
+    const nameH = escapeHtml(name);
+
+    const expand = '<button id="nodes-expand" data-key="' + keyH + '" icon primary><i>' + isExpanded(key) + '</i></button>';
+    const action = '<button id="nodes-remove" data-key="' + keyH + '" data-val="' + idH + '" data-tip="Remove Node" data-pos="left" icon primary><i>delete</i></button>';
 
     const upstream = client.get(key + '/upstream', 'no');
     const token = client.get(key + '/token', '');
@@ -741,9 +763,9 @@ function listNodes(system) {
     list +=
       '<tr>' +
         '<td>' + expand + '</td>' +
-        '<td>' + id + '</td>' +
-        '<td data-key="' + key + '/name">' + name + '</td>' +
-        '<td data-key="' + key + '/upstream" align="center" capitalize>' + upstream + '</td>' +
+        '<td>' + idH + '</td>' +
+        '<td data-key="' + keyH + '/name">' + nameH + '</td>' +
+        '<td data-key="' + keyH + '/upstream" align="center" capitalize>' + escapeHtml(upstream) + '</td>' +
         '<td>' + action + '</td>' +
       '</tr>' +
       '<tr expand' + isHidden(key) + '>' +
@@ -751,14 +773,14 @@ function listNodes(system) {
         '<td colspan="4">' +
           '<form id="node-form">' +
             '<label>Node name</label>' +
-            '<input id="node-name" type="text" value="' + name + '" maxlength="128" data-key="' + key + '/name" placeholder="New Node"/>' +
+            '<input id="node-name" type="text" value="' + nameH + '" maxlength="128" data-key="' + keyH + '/name" placeholder="New Node"/>' +
             '<label>Node upstream</label>' +
-            '<select id="node-upstream" data-key="' + key + '/upstream">' +
+            '<select id="node-upstream" data-key="' + keyH + '/upstream">' +
               '<option value="yes"' + isSelected(upstream, 'yes') + '>Yes</option>' +
               '<option value="no"' + isSelected(upstream, 'no') + '>No</option>' +
             '</select>' +
             '<label>Node token</label>' +
-            '<input id="node-token" type="text" value="' + token + '" maxlength="128" data-key="' + key + '/token" readonly/>' +
+            '<input id="node-token" type="text" value="' + escapeHtml(token) + '" maxlength="128" data-key="' + keyH + '/token" readonly/>' +
           '</form>' +
           listContexts(system, id) +
         '</td>' +
@@ -767,7 +789,7 @@ function listNodes(system) {
     total++;
   }
 
-  const add = '<button id="nodes-add" data-val="' + system + '" data-tip="Add Node" data-pos="left" icon primary><i>add</i></button>';
+  const add = '<button id="nodes-add" data-val="' + escapeHtml(system) + '" data-tip="Add Node" data-pos="left" icon primary><i>add</i></button>';
   const caption = '<caption>' + pluralize(total, 'Node', 'Nodes') + ' found</caption>';
 
   return '<table>' +
@@ -801,16 +823,20 @@ function listContexts(system, node) {
 
     const key = ns + id;
 
-    const expand = '<button id="contexts-expand" data-key="' + key + '" icon primary><i>' + isExpanded(key) + '</i></button>';
-    const action = '<button id="contexts-remove" data-key="' + key + '" data-val="' + id + '" data-tip="Remove Context" data-pos="left" icon primary><i>delete</i></button>';
+    const keyH = escapeHtml(key);
+    const idH = escapeHtml(id);
+    const nameH = escapeHtml(name);
+
+    const expand = '<button id="contexts-expand" data-key="' + keyH + '" icon primary><i>' + isExpanded(key) + '</i></button>';
+    const action = '<button id="contexts-remove" data-key="' + keyH + '" data-val="' + idH + '" data-tip="Remove Context" data-pos="left" icon primary><i>delete</i></button>';
 
     const token = client.get(key + '/token', '');
 
     list +=
       '<tr>' +
         '<td>' + expand + '</td>' +
-        '<td>' + id + '</td>' +
-        '<td data-key="' + key + '/name">' + name + '</td>' +
+        '<td>' + idH + '</td>' +
+        '<td data-key="' + keyH + '/name">' + nameH + '</td>' +
         '<td>' + action + '</td>' +
       '</tr>' +
       '<tr expand' + isHidden(key) + '>' +
@@ -818,9 +844,9 @@ function listContexts(system, node) {
         '<td colspan="3">' +
           '<form id="context-form">' +
             '<label>Context name</label>' +
-            '<input id="context-name" type="text" value="' + name + '" maxlength="128" data-key="' + key + '/name" placeholder="New Context"/>' +
+            '<input id="context-name" type="text" value="' + nameH + '" maxlength="128" data-key="' + keyH + '/name" placeholder="New Context"/>' +
             '<label>Context token</label>' +
-            '<input id="context-token" type="text" value="' + token + '" maxlength="128" data-key="' + key + '/token" readonly/>' +
+            '<input id="context-token" type="text" value="' + escapeHtml(token) + '" maxlength="128" data-key="' + keyH + '/token" readonly/>' +
           '</form>' +
           listCaps(system, node, id) +
         '</td>' +
@@ -829,7 +855,7 @@ function listContexts(system, node) {
     total++;
   }
 
-  const add = '<button id="contexts-add" data-val="' + system + ':' + node + '" data-tip="Add Context" data-pos="left" icon primary><i>add</i></button>';
+  const add = '<button id="contexts-add" data-val="' + escapeHtml(system + ':' + node) + '" data-tip="Add Context" data-pos="left" icon primary><i>add</i></button>';
   const caption = '<caption>' + pluralize(total, 'Context', 'Contexts') + ' found</caption>';
 
   return '<table>' +
@@ -862,18 +888,23 @@ function listCaps(system, node, context) {
 
     const key = ns + role + '/' + id;
 
-    const expand = '<button id="caps-expand" data-key="' + key + '" icon primary><i>' + isExpanded(key) + '</i></button>';
-    const action = '<button id="caps-remove" data-key="' + key + '" data-val="' + id + '" data-tip="Remove Capability" data-pos="left" icon primary><i>delete</i></button>';
+    const keyH = escapeHtml(key);
+    const idH = escapeHtml(id);
+    const roleH = escapeHtml(role);
+    const versionH = escapeHtml(version);
+
+    const expand = '<button id="caps-expand" data-key="' + keyH + '" icon primary><i>' + isExpanded(key) + '</i></button>';
+    const action = '<button id="caps-remove" data-key="' + keyH + '" data-val="' + idH + '" data-tip="Remove Capability" data-pos="left" icon primary><i>delete</i></button>';
 
     const scope = client.get(key + '/scope', '');
 
     list +=
       '<tr>' +
         '<td>' + expand + '</td>' +
-        '<td capitalize>' + role + '</td>' +
-        '<td>' + id + '</td>' +
-        '<td data-key="' + key + '/version" align="center">' + version + '</td>' +
-        '<td data-key="' + key + '/scope">' + scope + '</td>' +
+        '<td capitalize>' + roleH + '</td>' +
+        '<td>' + idH + '</td>' +
+        '<td data-key="' + keyH + '/version" align="center">' + versionH + '</td>' +
+        '<td data-key="' + keyH + '/scope">' + escapeHtml(scope) + '</td>' +
         '<td>' + action + '</td>' +
       '</tr>' +
       '<tr expand' + isHidden(key) + '>' +
@@ -881,9 +912,9 @@ function listCaps(system, node, context) {
         '<td colspan="5">' +
           '<form id="cap-form">' +
             '<label>Capability version</label>' +
-            '<input id="cap-version" type="text" value="' + version + '" maxlength="1" pattern="[1-9]" data-key="' + key + '/version"/>' +
+            '<input id="cap-version" type="text" value="' + versionH + '" maxlength="1" pattern="[1-9]" data-key="' + keyH + '/version"/>' +
             '<label>Capability scope</label>' +
-            '<input id="cap-scope" type="text" value="' + scope + '" maxlength="128" data-key="' + key + '/scope"/>' +
+            '<input id="cap-scope" type="text" value="' + escapeHtml(scope) + '" maxlength="128" data-key="' + keyH + '/scope"/>' +
             formDefaults(system, node, context, role, id, version) +
           '</form>' +
           listConns(system, node, context, role, id, version) +
@@ -893,7 +924,7 @@ function listCaps(system, node, context) {
     total++;
   }
 
-  const add = '<button id="caps-add" data-val="' + system + ':' + node + ':' + context + '" data-tip="Add Capability" data-pos="left" icon primary><i>add</i></button>';
+  const add = '<button id="caps-add" data-val="' + escapeHtml(system + ':' + node + ':' + context) + '" data-tip="Add Capability" data-pos="left" icon primary><i>add</i></button>';
   const caption = '<caption>' + pluralize(total, 'Capability', 'Capabilities') + ' found</caption>';
 
   return '<table>' +
@@ -935,15 +966,15 @@ function listConns(system, node, context, role, profile, version) {
     const key = ns + id;
     const otherKey = 'cns/' + system + '/nodes/' + otherNode + '/contexts/' + otherContext;
 
-    const expand = '<button id="conns-expand" data-key="' + key + '" icon primary><i>' + isExpanded(key) + '</i></button>';
+    const expand = '<button id="conns-expand" data-key="' + escapeHtml(key) + '" icon primary><i>' + isExpanded(key) + '</i></button>';
 
     list +=
       '<tr>' +
         '<td>' + expand + '</td>' +
-        '<td>' + id + '</td>' +
-        '<td>' + otherNode + '</td>' +
-        '<td>' + otherContext + '</td>' +
-        '<td data-key="' + otherKey + '/name">' + name + '</td>' +
+        '<td>' + escapeHtml(id) + '</td>' +
+        '<td>' + escapeHtml(otherNode) + '</td>' +
+        '<td>' + escapeHtml(otherContext) + '</td>' +
+        '<td data-key="' + escapeHtml(otherKey) + '/name">' + escapeHtml(name) + '</td>' +
         '<td></td>' +
       '</tr>' +
       '<tr expand' + isHidden(key) + '>' +
@@ -956,8 +987,10 @@ function listConns(system, node, context, role, profile, version) {
   const emulate = client.get(ps + '/emulate');
   const watch = client.get(ps + '/watch');
 
-  const emulator = '<button id="emulators-add" data-key="' + ps + '" data-val="' + (emulate?'off':'on') + '" data-tip="Emulate Capability" data-pos="left" icon primary><i>' + isEmulator(emulate) + '</i></button>';
-  const watcher = '<button id="watchers-add" data-key="' + ps + '" data-val="' + (watch?'off':'on') + '" data-tip="Watch Capability" data-pos="left" icon primary><i>' + isWatcher(watch) + '</i></button>';
+  const psH = escapeHtml(ps);
+
+  const emulator = '<button id="emulators-add" data-key="' + psH + '" data-val="' + (emulate?'off':'on') + '" data-tip="Emulate Capability" data-pos="left" icon primary><i>' + isEmulator(emulate) + '</i></button>';
+  const watcher = '<button id="watchers-add" data-key="' + psH + '" data-val="' + (watch?'off':'on') + '" data-tip="Watch Capability" data-pos="left" icon primary><i>' + isWatcher(watch) + '</i></button>';
 
   const caption = '<caption>' + pluralize(total, 'Connection', 'Connections') + ' found</caption>';
 
@@ -997,19 +1030,17 @@ function listKeys() {
     const parts = key.split('/');
     const value = keys[key];
 
-    // Ignore profiles
-//    if ()
-
     if (!wildcard || match(key, wildcard) || match(value, wildcard)) {
       const id = parts[parts.length - 1];
+      const keyH = escapeHtml(key);
 
-      const expand = '<button id="keys-expand" data-key="' + key + '" icon primary><i>' + isExpanded(key) + '</i></button>';
-      const action = '<button id="keys-remove" data-key="' + key + '" data-val="' + id + '" data-tip="Remove Key" data-pos="left" icon primary><i>delete</i></button>';
+      const expand = '<button id="keys-expand" data-key="' + keyH + '" icon primary><i>' + isExpanded(key) + '</i></button>';
+      const action = '<button id="keys-remove" data-key="' + keyH + '" data-val="' + escapeHtml(id) + '" data-tip="Remove Key" data-pos="left" icon primary><i>delete</i></button>';
 
       list +=
         '<tr>' +
           '<td>' + expand + '</td>' +
-          '<td>' + key + '</td>' +
+          '<td>' + keyH + '</td>' +
           '<td>' + action + '</td>' +
         '</tr>' +
         '<tr expand' + isHidden(key) + '>' +
@@ -1017,7 +1048,7 @@ function listKeys() {
           '<td colspan="2">' +
             '<form id="node-form">' +
               '<label>Key value</label>' +
-              '<input id="key-value" type="text" value="' + value + '" data-key="' + key + '"/>' +
+              '<input id="key-value" type="text" value="' + escapeHtml(value) + '" data-key="' + keyH + '"/>' +
             '</form>' +
           '</td>' +
         '</tr>';
@@ -1058,8 +1089,8 @@ function formDefaults(system, node, context, role, profile, version) {
     const key = ns + name;
 
     form +=
-      '<label>Capability ' + name + '</label>' +
-      '<input id="cap-default" type="text" value="' + value + '" data-key="' + key + '"/>';
+      '<label>Capability ' + escapeHtml(name) + '</label>' +
+      '<input id="cap-default" type="text" value="' + escapeHtml(value) + '" data-key="' + escapeHtml(key) + '"/>';
   }
   return form;
 }
@@ -1086,8 +1117,8 @@ function formProperties(system, node, context, role, profile, version, conn) {
     const key = ns + name;
 
     form +=
-      '<label>Connection ' + name + '</label>' +
-      '<input id="conn-property" type="text" value="' + value + '" data-key="' + key + '"' + readonly + '/>';
+      '<label>Connection ' + escapeHtml(name) + '</label>' +
+      '<input id="conn-property" type="text" value="' + escapeHtml(value) + '" data-key="' + escapeHtml(key) + '"' + readonly + '/>';
   }
 
   if (form !== '') {
@@ -1327,9 +1358,11 @@ async function execute(cmd) {
   if (format === 'json')
       text = JSON.stringify(text, null, 2);
 
-  text = escapeHtml(text);
+  // Named for what it is, so it is obvious at the sink below (and to the
+  // call-site check in test/escape.mjs) that this went through the escaper.
+  const safe = escapeHtml(text);
 
-  if (text !== '') html('#command-response', '<pre>' + text + '</pre>');
+  if (safe !== '') html('#command-response', '<pre>' + safe + '</pre>');
 }
 
 // Reconnect to network
@@ -1366,12 +1399,35 @@ function pluralize(value, singular, plural) {
   return value + ' ' + ((value === 1)?singular:plural);
 }
 
+// Build a [data-key="…"] selector for a CNS key
+//
+// Keys come from etcd and may contain characters that are syntax inside a CSS
+// attribute selector — a double quote or a backslash makes querySelector throw
+// SyntaxError. That throw happens inside the async update() handler, so it
+// surfaces as an unhandled rejection: no error dialog, and the list rebuild
+// below it never runs, leaving the dashboard silently frozen until reload.
+// Inside a double-quoted attribute value only " and \ are special, so escaping
+// those two is sufficient and leaves the selector readable (CSS.escape would
+// also escape every / in a CNS key).
+function keySelector(key) {
+  return '[data-key="' + String(key).replace(/["\\]/g, '\\$&') + '"]';
+}
+
 // Escape html characters
+//
+// Every key and value shown in the dashboard comes from etcd and is therefore
+// attacker-controllable: any participant may write a value (or, within its own
+// tree, a key) that a privileged operator's browser later renders. These lists
+// are built as innerHTML strings, so an unescaped value is stored XSS in the
+// operator's session — which is a full realm console. Escape both text content
+// AND attribute context: " and ' matter because values land inside value="…".
 function escapeHtml(value) {
-  return value
+  return String(value ?? '')
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;');
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
 }
 
 // Wildcard match

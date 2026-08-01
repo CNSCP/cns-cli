@@ -371,7 +371,25 @@ quit
 | $path        | Current key path                 | cns/network/nodes/node1    |
 | $ask         | Input from previous ask command  | My input                   |
 
-environment, config, output, stats, variables
+A `$name` not in the table above resolves, in order, from the environment,
+config, output options, stats and any variables you have assigned.
+
+#### Substitution is console-only
+
+Variables are a convenience of the interactive console and of scripts run with
+`run`. **A caller on the dashboard websocket — the SDK, and the dashboard's own
+Console view — only ever gets `$new`, `$uuid`, `$rand`, `$now`, `$date` and
+`$time`.** Every other `$name` is left in the value as literal text.
+
+Two reasons. Those other sources are all server-side state: `config` holds the
+dashboard's JWT signing key, and `$ask`/`$path` belong to whoever is at the
+console, so resolving them for a remote caller would hand one participant
+another's secrets. And a value is data — `"costs $5"` or JSON containing
+`"$ref"` must store as written rather than failing or expanding.
+
+So over the socket `put <key> "$HOME"` stores the six characters `$HOME`. If you
+want an environment value in a key, resolve it in your own client before
+sending it.
 
 ## Maintainers
 

@@ -627,6 +627,27 @@ dd {
   box-shadow: rgba(0, 0, 0, 0.12) 0 1px 3px, rgba(0, 0, 0, 0.24) 0 1px 2px;
 }
 
+/* Watcher card colours.
+   These were an inline style="border-color: …" attribute built in main.js.
+   The dashboard serves a strict Content-Security-Policy, and inline style
+   ATTRIBUTES fall under style-src-attr, which inherits style-src 'self' — so
+   the attribute was refused and every card lost its colour. Same palette,
+   as classes, so no 'unsafe-inline' is needed. Keep in step with PALETTE in
+   main.js. */
+
+dd[class^="pal"] {
+  border-bottom-style: solid;
+}
+
+dd.pal0 { border-bottom-color: #66c5cc; }
+dd.pal1 { border-bottom-color: #f6cf71; }
+dd.pal2 { border-bottom-color: #f89c74; }
+dd.pal3 { border-bottom-color: #dcb0f2; }
+dd.pal4 { border-bottom-color: #87c55f; }
+dd.pal5 { border-bottom-color: #9eb9f3; }
+dd.pal6 { border-bottom-color: #fe88b1; }
+dd.pal7 { border-bottom-color: #b3b3b3; }
+
 dd:hover {
   background-color: var(--hover);
   cursor: pointer;
