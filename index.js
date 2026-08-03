@@ -1223,8 +1223,15 @@ async function connect() {
   const password = config.password;
 
   // Client options
+  // Multiple endpoints: host may be a comma-separated list of host[:port]
+  // entries (a raft cluster). etcd3 accepts a hosts array and fails over
+  // between them — without this, losing the single configured member takes
+  // the dashboard down even though the cluster itself is healthy.
   const options = {
-    hosts: host + (port ? (':' + port) : '')
+    hosts: host.includes(',')
+      ? host.split(',').map((h) => h.trim()).filter(Boolean)
+        .map((h) => h.includes(':') ? h : (h + (port ? (':' + port) : '')))
+      : host + (port ? (':' + port) : '')
   };
 
   // Using auth?
