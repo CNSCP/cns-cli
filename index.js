@@ -1429,9 +1429,17 @@ async function systems(arg1, arg2, arg3, arg4) {
   }
 
   // Update new values
-  put(ns + 'name', name);
-  put(ns + 'orchestrator', orchestrator);
-  put(ns + 'token', token);
+  //
+  // MUST be awaited: the response to `systems` is the caller's signal that
+  // the system record is committed. Unawaited, the reply races the etcd
+  // commit — invisible on a single-member store (commit ~0.4ms beats the
+  // next WS command) but near-deterministic failure on a raft cluster,
+  // where the immediately following `nodes` command's exists() check reads
+  // before the commit lands and rejects with Not found. (Found 2026-08-03
+  // running the realm on a 3-member etcd cluster.)
+  await put(ns + 'name', name);
+  await put(ns + 'orchestrator', orchestrator);
+  await put(ns + 'token', token);
 
   cd(ns);
 }
