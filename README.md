@@ -395,8 +395,4 @@ sending it.
 
 ## License
 
-See [LICENSE.md](./LICENSE.md).
-
-## Copyright Notice
-
-See [COPYRIGHT.md](./COPYRIGHT.md).
+See [LICENSE](./LICENSE).
