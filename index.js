@@ -1223,8 +1223,15 @@ async function connect() {
   const password = config.password;
 
   // Client options
+  // Multiple endpoints: host may be a comma-separated list of host[:port]
+  // entries (a raft cluster). etcd3 accepts a hosts array and fails over
+  // between them — without this, losing the single configured member takes
+  // the dashboard down even though the cluster itself is healthy.
   const options = {
-    hosts: host + (port ? (':' + port) : '')
+    hosts: host.includes(',')
+      ? host.split(',').map((h) => h.trim()).filter(Boolean)
+        .map((h) => h.includes(':') ? h : (h + (port ? (':' + port) : '')))
+      : host + (port ? (':' + port) : '')
   };
 
   // Using auth?
@@ -1429,9 +1436,17 @@ async function systems(arg1, arg2, arg3, arg4) {
   }
 
   // Update new values
-  put(ns + 'name', name);
-  put(ns + 'orchestrator', orchestrator);
-  put(ns + 'token', token);
+  //
+  // MUST be awaited: the response to `systems` is the caller's signal that
+  // the system record is committed. Unawaited, the reply races the etcd
+  // commit — invisible on a single-member store (commit ~0.4ms beats the
+  // next WS command) but near-deterministic failure on a raft cluster,
+  // where the immediately following `nodes` command's exists() check reads
+  // before the commit lands and rejects with Not found. (Found 2026-08-03
+  // running the realm on a 3-member etcd cluster.)
+  await put(ns + 'name', name);
+  await put(ns + 'orchestrator', orchestrator);
+  await put(ns + 'token', token);
 
   cd(ns);
 }
