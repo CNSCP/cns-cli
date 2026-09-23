@@ -12,7 +12,8 @@
     "start": "node index",
     "dashboard": "node index dashboard",
     "docs": "jsdoc2md ./public/cns.js > ./docs/cns.md",
-    "minify": "minify ./public/cns.js > ./public/cns.min.js"
+    "minify": "minify ./public/cns.js > ./public/cns.min.js",
+    "test": "node --test test/resolver.test.js test/declare.test.js"
   },
   "dependencies": {
     "colors": "^1.4.0",

@@ -50,7 +50,7 @@ Your application should now be ready to rock.
 | CNS_PORT         | Network port                | 2379                        |
 | CNS_USERNAME     | Network username            |                             |
 | CNS_PASSWORD     | Network password            |                             |
-| CNS_PROFILES     | Profile server URI          | https://cp.padi.io/profiles |
+| CP_REGISTRY_URL  | CP Registry that Connection Profiles are resolved from. Point it at a local Registry instance to resolve without reaching the internet. `CNS_PROFILES` (the old profile server) is no longer read. | https://cp.cnscp.io |
 | CNS_DASHBOARD_SECRET | Dashboard JWT signing secret. When set, dashboard requires an Bearer token on every request. When unset, the dashboard is unauthenticated. | |
 
 ### Command Line
@@ -69,7 +69,7 @@ cns [options] [ script.cns ] [command]
 | `-P, --port number`     | Set network port                | 2379             |
 | `-u, --username string` | Set network username            |                  |
 | `-p, --password string` | Set network password            |                  |
-| `-R, --profiles uri`    | Set profiles server             | https://cp.padi.io/profiles |
+| `-R, --registry uri`    | Set CP Registry URL             | https://cp.cnscp.io |
 | `-o, --output format`   | Set output format               | tree             |
 | `-i, --indent size`     | Set output indent size          | 2                |
 | `-c, --columns size`    | Set output column limit         | 0                |
@@ -247,14 +247,30 @@ contexts system node [context]
 #### providers
 
 ```sh
-providers system node context profile
+providers system node context profile [version] [scope]
 ```
 
 #### consumers
 
 ```sh
-consumers system node context profile
+consumers system node context profile [version] [scope]
 ```
+
+A declaration is checked against the CP Registry when it is made:
+
+- A Profile that isn't registered, has nothing published, or lacks the
+  version given is refused, with the reason.
+- With no version given (as the SDKs declare), the highest published,
+  non-Deprecated version is recorded.
+- A Deprecated version is accepted, but no new Connection forms at it.
+- If the Registry doesn't answer within 2 s, a declaration that names a
+  version is recorded anyway, for the orchestrator to check. One without a
+  version is recorded as soon as the Registry answers.
+
+A declaration records only `version` and `scope`: it carries no values, and
+declaring again leaves the values at the capability as they are. The
+interactive console prompts for the role's values and writes only the ones
+you change.
 
 #### map
 
@@ -390,6 +406,16 @@ another's secrets. And a value is data — `"costs $5"` or JSON containing
 So over the socket `put <key> "$HOME"` stores the six characters `$HOME`. If you
 want an environment value in a key, resolve it in your own client before
 sending it.
+
+## Tests
+
+```sh
+npm test
+```
+
+Runs the CP Registry resolver's and the declaration rules' tests against
+recorded Registry answers; no network needed. The socket tests in `test/`
+(`run-socket-security.sh`) need a running realm and are run separately.
 
 ## Maintainers
 

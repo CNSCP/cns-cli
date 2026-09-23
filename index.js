@@ -26,6 +26,13 @@ const crypto = require('crypto');
 const { AsyncLocalStorage } = require('async_hooks');
 
 const pack = require('./package.json');
+const registry = require('./registry');
+const declare = require('./declare');
+
+// CP Registry: how long a declaration waits for it, and how often a
+// declaration waiting for it is retried
+const REGISTRY_TIMEOUT = 2000;
+const PENDING_RETRY = 3000;
 
 // Errors
 
@@ -98,7 +105,7 @@ const defaults = {
   port: '2379',
   username: '',
   password: '',
-  profiles: 'https://cp.padi.io/profiles',
+  registry: 'https://cp.cnscp.io',
   connect_timeout: '10000',
   dashboardSecret: '',
   trustProxy: 1
@@ -111,7 +118,7 @@ const config = {
   port: process.env.CNS_PORT || defaults.port,
   username: process.env.CNS_USERNAME || defaults.username,
   password: process.env.CNS_PASSWORD || defaults.password,
-  profiles: process.env.CNS_PROFILES || defaults.profiles,
+  registry: process.env.CP_REGISTRY_URL || defaults.registry,
   connect_timeout: parseInt(process.env.CONNECT_TIMEOUT || defaults.connect_timeout),
   dashboardSecret: process.env.CNS_DASHBOARD_SECRET || defaults.dashboardSecret,
   // Hops (or subnet list) of trusted reverse proxy in front of the dashboard.
@@ -281,7 +288,12 @@ function session() {
 
 var client;
 
-var profiles;
+var resolver;
+var profilesIgnored = false;
+
+// Declarations waiting for the CP Registry (see declareCapability)
+const pending = new Map();   // capability namespace -> { profile, scope }
+var pendingTimer;
 var cache;
 var watcher;
 
@@ -348,7 +360,7 @@ function usage() {
   print('  -P, --port number             Set network port');
   print('  -u, --username string         Set network username');
   print('  -p, --password string         Set network password');
-  print('  -R, --profiles                Set profile server');
+  print('  -R, --registry uri            Set CP Registry URL');
   print('  -o, --output format           Set output format');
   print('  -i, --indent size             Set output indent size');
   print('  -c, --columns size            Set output column limit');
@@ -365,7 +377,7 @@ function usage() {
   print('  CNS_PORT                      Default network port');
   print('  CNS_USERNAME                  Default network username');
   print('  CNS_PASSWORD                  Default network password');
-  print('  CNS_PROFILES                  Default profile server');
+  print('  CP_REGISTRY_URL               CP Registry URL (https://cp.cnscp.io)');
 
   print('\nDocumentation can be found at https://github.com/cnscp/cns-cli/');
 }
@@ -430,9 +442,14 @@ function parse(args) {
         config.password = next(arg, args);
         break;
       case '-R':
+      case '--registry':
+        // CP Registry
+        config.registry = next(arg, args);
+        break;
       case '--profiles':
-        // Profile server
-        config.profiles = next(arg, args);
+        // No longer used: Profiles come from the CP Registry
+        next(arg, args);
+        profilesIgnored = true;
         break;
       case '-o':
       case '--output':
@@ -478,6 +495,10 @@ function parse(args) {
         throw new Error(E_OPTION + ': ' + arg);
     }
   }
+
+  // Profiles come from the CP Registry, as set above
+  startResolver();
+
   return cmds.join(' ').trim();
 }
 
@@ -1147,13 +1168,13 @@ async function init() {
     'CNS Port',
     'CNS Username',
     'CNS Password',
-    'CNS Profile Server'
+    'CP Registry URL'
   ], [
     config.host,
     config.port,
     config.username,
     null,//config.password
-    config.profiles
+    config.registry
   ]);
 
   // Get answers
@@ -1161,7 +1182,7 @@ async function init() {
   config.port = answers[1];
   config.username = answers[2];
   config.password = answers[3];
-  config.profiles = answers[4];
+  config.registry = answers[4];
 
   // Prompt to write
   print('\nAbout to write .env file:\n');
@@ -1170,7 +1191,7 @@ async function init() {
   print('CNS_PORT = ' + config.port);
   print('CNS_USERNAME = ' + config.username);
   print('CNS_PASSWORD = ' + '*'.repeat(config.password.length));
-  print('CNS_PROFILES = ' + config.profiles);
+  print('CP_REGISTRY_URL = ' + config.registry);
 
   await confirmation();
 
@@ -1183,12 +1204,12 @@ async function init() {
     CNS_PORT: config.port,
     CNS_USERNAME: config.username,
     CNS_PASSWORD: config.password,
-    CNS_PROFILES: config.profiles
+    CP_REGISTRY_URL: config.registry
   };
 
-  // Keep user settings
+  // Keep user settings (CNS_PROFILES is no longer used)
   for (const name in env.parsed) {
-    if (data[name] === undefined)
+    if (data[name] === undefined && name !== 'CNS_PROFILES')
       data[name] = env.parsed[name];
   }
 
@@ -1207,6 +1228,25 @@ async function init() {
 
   // Re-connect
   await connect();
+}
+
+// Create the CP Registry resolver. It is kept for the life of the process,
+// across key store reconnects. Declarations wait at most 2 s for the
+// Registry: the Python SDK gives up on a reply after 5 s.
+function startResolver() {
+  resolver = registry.createResolver({
+    origin: config.registry,
+    timeout: REGISTRY_TIMEOUT,
+    debug: debug
+  });
+
+  // The old profile server setting is no longer read
+  if (process.env.CNS_PROFILES !== undefined || profilesIgnored)
+    warning('CNS_PROFILES / --profiles is no longer used: Profiles are resolved from CP_REGISTRY_URL');
+
+  // Pointed at the old profile server by mistake?
+  if (/\/profiles$/.test(resolver.origin))
+    warning('CP_REGISTRY_URL ends in /profiles: expected the CP Registry origin, such as https://cp.cnscp.io');
 }
 
 // Connect client
@@ -1337,7 +1377,6 @@ async function disconnect() {
   stats.connection = S_OFFLINE;
 
   // Reset cache
-  profiles = {};
   cache = {};
 
   // Close watcher?
@@ -1574,100 +1613,34 @@ async function contexts(arg1, arg2, arg3, arg4, arg5) {
 
 // Configure provider
 async function providers(arg1, arg2, arg3, arg4, arg5, arg6) {
-  // Must be connected
-  if (client === undefined)
-    throw new Error(E_CONNECT);
-
-  var system = required(arg1);
-  var node = required(arg2);
-  var context = required(arg3);
-  var profile = required(arg4);
-  var version = argument(arg5, 1);
-  var scope = argument(arg6, '');
-
-  // System must exist
-  if (!await exists('cns/' + system + '/name'))
-    throw new Error(E_FOUND + ': ' + system);
-
-  // Node must exist
-  if (!await exists('cns/' + system + '/nodes/' + node + '/name'))
-    throw new Error(E_FOUND + ': ' + node);
-
-  // Context must exist
-  if (!await exists('cns/' + system + '/nodes/' + node + '/contexts/' + context + '/name'))
-    throw new Error(E_FOUND + ': ' + context);
-
-  // Profile must exist
-  const properties = await getProperties(profile, version);
-
-  // Provider namespace
-  const ns = 'cns/' + system + '/nodes/' + node + '/contexts/' + context + '/provider/' + profile + '/';
-
-  // Get property values
-  const names = [];
-  const prompts = [];
-  const defaults = [];
-
-  for (const name in properties) {
-    const property = properties[name];
-
-    if (property.provider === 'yes') {
-      // Add to list
-      names.push(name);
-      prompts.push(property.name);
-      defaults.push(cache[ns + 'properties/' + property] || '');
-    }
-  }
-
-  var answers = defaults;
-
-  // Edit in console?
-  if (session().pipe === undefined) {
-    // Output help
-    print('This utility will walk you through setting up a provider capability.');
-    print('It only covers the most common items, and tries to guess sensible defaults.\n');
-
-    print('Press ^C at any time to quit.\n');
-
-    // Ask questions
-    answers = await questions(
-      prompts,
-      defaults);
-
-    // Prompt to write
-    print('\nAbout to publish properties:\n');
-
-    print('version = ' + version);
-    print('scope = ' + scope);
-
-    for (var n = 0; n < names.length; n++)
-      print(names[n] + ' = ' + answers[n]);
-
-    await confirmation();
-  }
-
-  // Update new values
-  await put(ns + 'version', version);
-  await put(ns + 'scope', scope);
-
-  for (var n = 0; n < names.length; n++)
-    await put(ns + 'properties/' + names[n], answers[n]);
-
-  cd(ns);
+  await declareCapability('provider', arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 // Configure consumer
 async function consumers(arg1, arg2, arg3, arg4, arg5, arg6) {
+  await declareCapability('consumer', arg1, arg2, arg3, arg4, arg5, arg6);
+}
+
+// Declare a capability (CNS/CP specification §8.4).
+//
+// The declaration records the Profile version and the scope. It carries no
+// values (§4): a node writes values at its capability afterwards, and a
+// redeclaration leaves them as they are. Only the console writes values
+// here, and only the ones its user changes.
+//
+// With no version given (every SDK declaration), the highest published,
+// non-Deprecated version is recorded. See chooseDeclaredVersion().
+async function declareCapability(role, arg1, arg2, arg3, arg4, arg5, arg6) {
   // Must be connected
   if (client === undefined)
     throw new Error(E_CONNECT);
 
-  var system = required(arg1);
-  var node = required(arg2);
-  var context = required(arg3);
-  var profile = required(arg4);
-  var version = argument(arg5, 1);
-  var scope = argument(arg6, '');
+  const system = required(arg1);
+  const node = required(arg2);
+  const context = required(arg3);
+  const profile = required(arg4);
+  const requested = argument(arg5);
+  const scope = argument(arg6, '');
 
   // System must exist
   if (!await exists('cns/' + system + '/name'))
@@ -1681,43 +1654,65 @@ async function consumers(arg1, arg2, arg3, arg4, arg5, arg6) {
   if (!await exists('cns/' + system + '/nodes/' + node + '/contexts/' + context + '/name'))
     throw new Error(E_FOUND + ': ' + context);
 
-  // Profile must exist
-  const properties = await getProperties(profile, version);
+  // Capability namespace
+  const ns = 'cns/' + system + '/nodes/' + node + '/contexts/' + context + '/' + role + '/' + profile + '/';
 
-  // Consumer namespace
-  const ns = 'cns/' + system + '/nodes/' + node + '/contexts/' + context + '/consumer/' + profile + '/';
+  // A newer declaration of this capability replaces one still waiting
+  pending.delete(ns);
 
-  // Get property values
-  const names = [];
-  const prompts = [];
-  const defaults = [];
+  // Which version to record (throws if the declaration is defective)
+  const choice = await chooseDeclaredVersion(profile, requested);
 
-  for (const name in properties) {
-    // Consumer property?
-    const property = properties[name];
-
-    if (property.provider === 'no') {
-      // Add to list
-      names.push(name);
-      prompts.push(property.name);
-      defaults.push(cache[ns + 'properties/' + property] || '');
-    }
+  // No version given, the Registry is not answering, and this Profile has
+  // not been seen since start: write the declaration when it answers
+  if (choice === null) {
+    notice('CP Registry unavailable: ' + profile + ' at ' + ns + ' will be declared when it answers');
+    pending.set(ns, { profile: profile, scope: scope });
+    schedulePending();
+    return;
   }
 
-  var answers = defaults;
+  const version = choice.version;
+  var writes = [];
 
   // Edit in console?
   if (session().pipe === undefined) {
+    // The role's Properties, for the prompts
+    var properties = {};
+
+    try {
+      properties = await resolver.properties(profile, version);
+    } catch (e) {
+      notice('Properties unavailable (' + e.message + '): declaring without values');
+    }
+
+    const names = [];
+    const prompts = [];
+    const current = {};
+
+    for (const name in properties) {
+      const property = properties[name];
+
+      if (property.provider === ((role === 'provider') ? 'yes' : 'no')) {
+        names.push(name);
+        prompts.push(property.name);
+        current[name] = cache[ns + 'properties/' + name];
+      }
+    }
+
     // Output help
-    print('This utility will walk you through setting up a consumer capability.');
+    print('This utility will walk you through setting up a ' + role + ' capability.');
     print('It only covers the most common items, and tries to guess sensible defaults.\n');
 
     print('Press ^C at any time to quit.\n');
 
-    // Ask questions
-    answers = await questions(
+    // Ask questions (each defaults to the value held now)
+    const answers = await questions(
       prompts,
-      defaults);
+      names.map((name) => (current[name] === undefined) ? '' : current[name]));
+
+    // Only the answers that change a value are written
+    writes = declare.changedAnswers(names, answers, current);
 
     // Prompt to write
     print('\nAbout to publish properties:\n');
@@ -1725,20 +1720,97 @@ async function consumers(arg1, arg2, arg3, arg4, arg5, arg6) {
     print('version = ' + version);
     print('scope = ' + scope);
 
-    for (var n = 0; n < names.length; n++)
-      print(names[n] + ' = ' + answers[n]);
+    for (const [name, value] of writes)
+      print(name + ' = ' + value);
 
     await confirmation();
   }
 
-  // Update new values
+  // Record the declaration
   await put(ns + 'version', version);
   await put(ns + 'scope', scope);
 
-  for (var n = 0; n < names.length; n++)
-    await put(ns + 'properties/' + names[n], answers[n]);
+  for (const [name, value] of writes)
+    await put(ns + 'properties/' + name, value);
 
   cd(ns);
+}
+
+// Choose the version a declaration records, asking the CP Registry now.
+// Resolves { version, deprecated }, or null when no version was given and
+// the Registry is not answering with nothing held for this Profile. Throws
+// when the declaration is defective: not registered, nothing published, or
+// no such version (§8.4).
+async function chooseDeclaredVersion(profile, requested) {
+  var surface;
+
+  try {
+    surface = await resolver.surface(profile);
+  } catch (e) {
+    if (e.kind !== registry.UNAVAILABLE)
+      throw new Error(E_FOUND + ': ' + e.message);
+
+    // No answer, and nothing held
+    if (requested === undefined) return null;
+
+    // A version was given: record it, and let the orchestrator decide once
+    // the Registry answers
+    const n = registry.parseVersion(requested);
+    if (n === null)
+      throw new Error(E_FOUND + ': ' + profile + ':' + requested + ' ' + registry.NO_VERSION);
+
+    notice('CP Registry unavailable: declaring ' + profile + ':' + n + ' unchecked');
+    return { version: n, deprecated: false };
+  }
+
+  if (surface.held)
+    notice('CP Registry unavailable: using ' + profile + ' versions as last held');
+
+  var choice;
+  try {
+    choice = declare.chooseVersion(profile, surface.versions, requested);
+  } catch (e) {
+    throw new Error(E_FOUND + ': ' + e.message);
+  }
+
+  // §8.6: declared, but no new Connection forms at a Deprecated version
+  if (choice.deprecated)
+    notice(profile + ':' + choice.version + ' is Deprecated: declared, but it will not bind');
+
+  return choice;
+}
+
+// Retry declarations waiting for the CP Registry. A declaration is dropped
+// when it turns out defective, or replaced when its capability is declared
+// again. Waiting declarations are held in memory only.
+function schedulePending() {
+  if (pendingTimer !== undefined) return;
+
+  pendingTimer = setTimeout(async () => {
+    pendingTimer = undefined;
+
+    for (const [ns, wait] of [...pending]) {
+      try {
+        const choice = await chooseDeclaredVersion(wait.profile, undefined);
+
+        // Still no answer, replaced meanwhile, or the key store is offline
+        if (choice === null || pending.get(ns) !== wait || client === undefined)
+          continue;
+
+        pending.delete(ns);
+
+        await put(ns + 'version', choice.version);
+        await put(ns + 'scope', wait.scope);
+
+        notice('Declared ' + wait.profile + ':' + choice.version + ' at ' + ns);
+      } catch (e) {
+        if (pending.get(ns) === wait) pending.delete(ns);
+        notice('Not declaring ' + wait.profile + ' at ' + ns + ': ' + e.message);
+      }
+    }
+
+    if (pending.size > 0) schedulePending();
+  }, PENDING_RETRY);
 }
 
 // Display profile connections
@@ -2634,71 +2706,6 @@ async function getProfiles() {
 }
 */
 
-// Get profile
-async function getProfile(name) {
-  // Already have it?
-  var profile = profiles[name];
-
-  if (profile === undefined) {
-    // Send request
-    try {
-      const data = JSON.parse(await request('GET', config.profiles + '/' + name));
-
-      // Convert result
-      profile = {
-        name: data.title,
-        versions: {}
-      };
-
-      // Convert versions
-      for (var n = 0; n < data.versions.length; n++) {
-        const version = data.versions[n];
-        const properties = {};
-
-        // Convert properties
-        for (const property of version.properties) {
-          properties[property.name] = {
-            name: property.description || property.name,
-            provider: (property.server === null) ? 'yes' : 'no',
-            required: (property.required === null) ? 'yes' : 'no',
-            propagate: (property.propagate === null) ? 'yes' : 'no'
-          };
-        }
-        profile.versions['version' + (n + 1)] = properties;
-      }
-    } catch (e) {
-      // Failure
-      debug(e.message);
-      profile = null;
-    }
-
-    // Set profile cache
-    profiles[name] = profile;
-  }
-
-  // Not found?
-  if (profile === null)
-    throw new Error(E_FOUND + ': ' + name);
-
-  return profile;
-}
-
-// Get profile properties
-async function getProperties(name, version) {
-  // Get profile descriptor
-  const profile = await getProfile(name);
-
-  // Get properties
-  const versions = profile.versions || [];
-  const properties = versions['version' + version];
-
-  // Missing version?
-  if (properties === undefined)
-    throw new Error(E_FOUND + ': ' + name + ' v' + version);
-
-  return properties;
-}
-
 // Get system nodes
 function getNodes(system) {
   const nodes = {};
@@ -3423,6 +3430,22 @@ function toTime(format) {
 function print(text) {
   if (!options.silent && !transmit(text + '\n'))
     console.log(text.green);
+}
+
+// Log a warning to stderr, so it never mixes with command output
+function warning(text) {
+  if (!options.silent)
+    console.error(text.yellow);
+}
+
+// A declaration notice. A socket caller's reply must stay empty when a
+// command succeeds: the Python SDK treats any other reply as no reply. So a
+// socket caller's notices go to cns-cli's own log.
+function notice(text) {
+  if (session().pipe === undefined)
+    print(text);
+  else
+    warning(text);
 }
 
 // Log debug to console
