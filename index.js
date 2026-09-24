@@ -159,8 +159,8 @@ const commands = {
   'output': output,
   'dashboard': dashboard,
   'init': init,
-  'connect': connect,
-  'disconnect': disconnect,
+  'connect': connectCommand,
+  'disconnect': disconnectCommand,
   //  'profiles': profiles,
   'systems': systems,
   'nodes': nodes,
@@ -297,6 +297,18 @@ var pendingTimer;
 var cache;
 var watcher;
 
+// Connection supervision (see superviseConnection)
+const RETRY_MIN = 1000;
+const RETRY_MAX = parseInt(process.env.CNS_RECONNECT_MAX || '30000');
+const WATCH_GRACE = parseInt(process.env.CNS_WATCH_GRACE || '30000');
+
+var wantConnected = false;
+var supervisor;
+var offlineSince = null;
+var nextAttempt = 0;
+var retryDelay = RETRY_MIN;
+var reconnecting = false;
+
 
 var server;
 var wss;
@@ -320,12 +332,20 @@ async function main(argv) {
     // Parse options
     const cmd = parse(argv);
 
+    // Connect to key store. A failure here is not final: the supervisor keeps
+    // retrying (see superviseConnection), so a dashboard that starts before
+    // its etcd is usable connects as soon as it is. Until then /health
+    // answers 503.
+    wantConnected = true;
+
     try {
-      // Connect to key store?
       await connect();
     } catch (e) {
-      // Failure
+      // Failure (quiet, as before: the supervisor reports retries under debug)
+      debug(e.message);
     }
+
+    startSupervisor();
 
     // Process command?
     if (cmd !== '') {
@@ -1350,8 +1370,19 @@ async function connect() {
       });
     })
     .on('error', (e) => {
-      // Failure
-      throw new Error(E_WATCH + ': ' + e.message);
+      // Failure. Not fatal: throwing from an event handler is an uncaught
+      // exception, which ended the whole process. Report it, go offline, and
+      // let the supervisor rebuild the connection straight away.
+      error(new Error(E_WATCH + ': ' + e.message));
+
+      // This watch is finished (the server has cancelled it), so drop it
+      // rather than ask it to cancel again: that promise never settles.
+      watcher = undefined;
+      stats.connection = S_OFFLINE;
+
+      broadcast({
+        stats: { connection: S_OFFLINE }
+      });
     });
 
   // Success
@@ -1367,6 +1398,92 @@ async function connect() {
   cd();
 }
 
+// Console connect / disconnect. They record intent, so the supervisor neither
+// fights a deliberate disconnect nor stops retrying after a deliberate connect.
+async function connectCommand() {
+  wantConnected = true;
+  await connect();
+}
+
+async function disconnectCommand() {
+  wantConnected = false;
+  await disconnect();
+}
+
+// Is there a live watch on the key store?
+function isConnected() {
+  return client !== undefined && watcher !== undefined && stats.connection === S_ONLINE;
+}
+
+// Start the connection supervisor
+function startSupervisor() {
+  if (supervisor !== undefined) return;
+
+  supervisor = setInterval(superviseConnection, 1000);
+  if (supervisor.unref) supervisor.unref();
+}
+
+// Stop the connection supervisor
+function stopSupervisor() {
+  if (supervisor !== undefined) {
+    clearInterval(supervisor);
+    supervisor = undefined;
+  }
+}
+
+// Keep the dashboard connected.
+//
+// Without this, a failed first connection was never retried: commands still
+// reached etcd once it came up (the client object already existed), but there
+// was no watch, so no live updates reached any app, every app got an empty
+// snapshot, and the status stayed 'offline' until the process restarted. On
+// a new realm that is the normal case: the chart starts etcd, the dashboard
+// and the orchestrator together and only then creates the etcd users.
+//
+// Once a second: if there is no live watch, reconnect with back-off (1 s,
+// doubling, capped at CNS_RECONNECT_MAX). A watch that exists but has dropped
+// is given CNS_WATCH_GRACE to recover on its own first, since etcd3 reconnects
+// a dropped watch by itself. A reconnect resets every app's view (disconnect
+// broadcasts an empty key set) and then sends the full snapshot again.
+async function superviseConnection() {
+  if (!wantConnected || reconnecting) return;
+
+  const now = Date.now();
+
+  // Healthy?
+  if (isConnected()) {
+    offlineSince = null;
+    retryDelay = RETRY_MIN;
+    return;
+  }
+
+  if (offlineSince === null) offlineSince = now;
+
+  // Give a dropped watch the chance to come back by itself
+  if (watcher !== undefined && now - offlineSince < WATCH_GRACE) return;
+
+  // Backing off?
+  if (now < nextAttempt) return;
+
+  reconnecting = true;
+
+  try {
+    debug('Reconnecting...');
+    await connect();
+
+    offlineSince = null;
+    retryDelay = RETRY_MIN;
+  } catch (e) {
+    // Failure
+    debug('Reconnect failed: ' + e.message + ' (next attempt in ' + retryDelay + 'ms)');
+
+    nextAttempt = Date.now() + retryDelay;
+    retryDelay = Math.min(retryDelay * 2, RETRY_MAX);
+  } finally {
+    reconnecting = false;
+  }
+}
+
 // Disconnect client
 async function disconnect() {
   // Reset stats
@@ -1379,11 +1496,15 @@ async function disconnect() {
   // Reset cache
   cache = {};
 
-  // Close watcher?
+  // Close watcher? A watch that has already failed may refuse to cancel;
+  // that must not stop a reconnect.
   if (watcher !== undefined) {
     debug('Unwatching...');
 
-    await watcher.cancel();
+    await Promise.race([
+      watcher.cancel(),
+      new Promise((resolve) => setTimeout(resolve, 2000))
+    ]).catch((e) => debug(e.message));
     watcher = undefined;
   }
 
@@ -2375,6 +2496,9 @@ async function exit(arg1) {
   const code = argument(arg1, 0) | 0;
 
   // Shutdown
+  wantConnected = false;
+  stopSupervisor();
+
   if (client !== undefined)
     await disconnect();
 
@@ -2993,6 +3117,18 @@ function start(host, port) {
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'no-referrer');
     next();
+  });
+
+  // Health - always reachable, never behind auth, for readiness probes. 200
+  // while the dashboard holds a live watch on etcd; 503 while it does not
+  // (starting up, reconnecting), when it could not deliver live updates.
+  app.get('/health', (req, res) => {
+    const ok = isConnected();
+
+    res.status(ok ? 200 : 503).json({
+      status: ok ? 'ok' : 'unavailable',
+      connection: stats.connection
+    });
   });
 
   // Login page - always reachable, never behind auth
